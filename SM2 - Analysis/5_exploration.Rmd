@@ -1,0 +1,1201 @@
+---
+title: "Diversity and team-performance meta-analysis: Exploratory Analyses"
+description: null
+output:
+  html_document:
+    theme: united
+    toc: yes
+    toc_float: true
+    code_folding: hide
+  pdf_document:
+    fig_height: 6
+    fig_width: 8
+  word_document: default
+Author: Lukas Wallrich 
+---
+
+```{r setup, message=FALSE}
+
+if (!require(groundhog)) install.packages('groundhog')
+groundhog::groundhog.library(c("readxl","metafor", "tidyverse", "clubSandwich", "cli", "esc",
+                              "gt", "gtExtras", "psych", "progressr", "ggtext"), date = "2023-07-09")
+
+# Need more recent version of patchwork due to faceting bug
+groundhog::groundhog.library(c("patchwork"), date = "2023-07-09")
+
+groundhog::groundhog.library(c("lukaswallrich/timesaveR"), date = "2023-07-09")
+
+source("helpers/helpers.R")
+source("helpers/equivalence_testing.R")
+source("helpers/source_rmd_chunks.R") # function to source code chunks from other Rmd files - used to include moderator test code here
+
+source_rmd_chunks("3_moderators.Rmd", "univariate-functions")
+
+dataset <- read_rds("data/full_dataset.rds")
+# Assumed correlation between dependent effect sizes
+rho <- 0.6
+```
+
+# Measurement choices
+
+To understand how diversity is measured, we clustered the specific measurements into the types of diversity indices/measures used.
+
+```{r}
+div_classification <- bind_rows(
+  tibble(div_meas_type = "Blau", div_specific = c(
+    "\"expertise\": degree augmented by self-reported skills where missing - Blau",
+    "(Herfindal-Hirschman index, but reversed here to be Blau)",
+    "(mixed with type of degree) - Blau",
+    "adjusted (?) Blau",
+    "age & gender - Blau",
+    "age, gender & nationality - Blau",
+    "All TMT - Blau",
+    "background in multiple industries (dummy) - Blau",
+    "bias-corrected Blau",
+    "Blau",
+    "Blau - based on accounting, others, mixed",
+    "Blau - but invalid range reported",
+    "Blau - disability",
+    "Blau - with multiple classifications",
+    "Blau (- industry average)",
+    "Blau (average of pitchers and batters)",
+    "Blau (called Herfindal–Hirschman)",
+    "Blau (coded as homogeneity)",
+    "Blau (coded as homogeneity) - T1",
+    "Blau (coded as homogeneity) - T2",
+    "Blau (standard, NOT as reported)",
+    "Blau (standardised into Index of Quality)",
+    "Blau (standardised per Biemann & Kearney)",
+    "Blau (with constant deviation)",
+    "Blau adjusted for group size",
+    "Blau adjusted for multiple category memberships",
+    "Blau allowing for multiple category membership",
+    "Blau index",
+    "Blau Index",
+    "Blau’s diversity index",
+    "Blau's index",
+    "Blau's Index",
+    "Blau’s index",
+    "Blau’s index, based on respondents' field of study for their highest degree",
+    "business vs not - Blau",
+    "called \"cultural\" but likely just nationality - Blau",
+    "Caucasian v not - Blau",
+    "contributor roles (developer v user) - Blau",
+    "country and nationality - Blau",
+    "country of residence - std Blau",
+    "Departments - Blau",
+    "diversity in skills - Blau",
+    "domain expertise - Blau",
+    "dominant (longest) - Blau",
+    "dominant function - Blau",
+    "dominant industrial background - Blau",
+    "Dutch vs non-Dutch - Blau",
+    "education - Blau",
+    "education - but unclear whether level or degree - Blau",
+    "entrepreneurial passion focus - Blau",
+    "expertise, source unclear - Blau",
+    "hometowns - Blau",
+    "industry tenure - Blau",
+    "industry-background - Blau",
+    "inter-regional diversity (nations clustered into regions) - Blau",
+    "interest variety - Blau",
+    "international experience in current and/or other companies - Blau",
+    "International playing experience - Blau(ish)",
+    "international work experience in past 5 years - Blau",
+    "IQV - standardized Blau",
+    "Japanese vs others (assumed to be host country) - Blau",
+    "job title (mix of profession and function) - Blau",
+    "Language - Blau",
+    "Location country - related to nationality - Blau",
+    "log Blau",
+    "managerial level previously held - Blau",
+    "marriage status - Blau",
+    "MBTI types - Blau",
+    "medical professions - Blau",
+    "Military branch (army, navy, air force, marines) - Blau",
+    "mix of function and profession - Blau",
+    "nationality-based culture clusters - Blau",
+    "Native language - Blau",
+    "native region - Blau",
+    "occupation (researcher, technician, support) - standardised Blau",
+    "of author's institutions - Blau",
+    "org - Blau",
+    "overseas functional experience - Blau",
+    "overseas professional experience - Blau",
+    "PhD vs not (?) - Blau",
+    "physical activity - Blau",
+    "political affiliation (donations) - scaled Blau",
+    "position - scaled Blau",
+    "previous professions, but categories match common functions - Blau",
+    "profession' - mix of function and degree - Blau",
+    "professions (e.g., nurse, dietician, speech therapist, ...) - Blau",
+    "professions (e.g., nurse, physician, admin, med technologists) - Blau",
+    "professions (e.g., nurse, physician, dieticians, ...) - Blau",
+    "professions (nurse, psychologist, secretary etc) - normalised Blau",
+    "professions (nurses, doctors etc) - Blau",
+    "professions (teacher, counselor, etc) - Blau",
+    "refined Blau - nationality & gender, SD - age",
+    "role in team (~function) - std Blau",
+    "roles, incl deputy head, educational advisor, psychologist (10 cats) - Blau",
+    "Roles: admin, developer, contributor - Blau",
+    "scaled Blau",
+    "standardised Blau",
+    "std Blau",
+    "T1 - Blau",
+    "T10 - Blau",
+    "T11 - Blau",
+    "T2 - Blau",
+    "T3 - Blau",
+    "T4 - Blau",
+    "T5 - Blau",
+    "T6 - Blau",
+    "T7 - Blau",
+    "T8 - Blau",
+    "T9 - Blau",
+    "team role, e.g., administrator, peripheral contributor (21 roles) - Blau",
+    "team-size normalised Blau",
+    "technical skills - Blau",
+    "total work experience - scaled Blau",
+    "white vs minority - Blau",
+    "work specialisation (computer science, engineering, management, other) - Blau",
+    "working type - permanent contract, public service, contractor, etc - Blau",
+    "Herfindahl-Hirschman",
+    "Herfindahl-Hirschman (with multiple group memberships)",
+    "Herfindahl-Hirschman Index",
+    "Herfindahl–Hirschman index",
+    "Herfindal-Hirschman",
+    "Herfindal–Hirschman index",
+    "Industrial diversity, Herfindahl–Hirschman index",
+    "Organisation - Herfindahl-Hirschman",
+    "team - Herfindahl",
+    "Whether the participant was employed or not, Herfindal–Hirschman index",
+    "industry focus - Blay",
+    "HHI",
+    "HHI (more = less diversity)"
+  )),
+  tibble(div_meas_type = "other", div_specific = c(
+    "Dummy - median split of Blau index",
+    "entropy (Teachman) or Blau - confusing methods",
+    "% of continents represented within TMT nationalities",
+    "euclidian distance",
+    "Euclidian distance",
+    "Shannon entropy",
+    "Shannon-Weaver entropy index",
+    "Shannon",
+    "Wagner (1984) index",
+    "Txy (between net of within)",
+    "Txy that appears to combine variety and separation (10.1111/j.1467-6486.2010.00932.x)",
+    "Txy-measure (combines variety and separation)",
+    "relational demography score (Tsui, Egan & O'Reilly, 1992), root of summed squared differences",
+    "agreeableness - mean pairwise distance",
+    "conscientiousness - mean pairwise distance",
+    "extroversion - mean pairwise distance",
+    "neuroticism - mean pairwise distance",
+    "openness - mean pairwise distance",
+    "Composite of ethnic and nationality - pairwise overlap",
+    "departmental affiliation - Euclidian distance based on rarity of combination",
+    "disability - IVQ index",
+    "migration status (no, 1st gen, 2nd gen) - index of qual variation (Mueller et al., 1970)",
+    "Euclidian distance on Hofstede's national culture dimensions",
+    "#functions controlled for team size",
+    "count of functions / team size",
+    "perceived environmental uncertainty - # areas of disagreement adj for team size",
+    "\"backgrounds\" of board members - i.e. professions - count/board size",
+    "range",
+    "range/mean",
+    "international experience - times in countries",
+    "working type - permanent contract, public service, contractor, etc - Mean Euclidian distance",
+    "sum of age, race, nationality and gender diversity points- indicates share of minority group members",
+    "self-efficacy - coefficient of agreement",
+    "mean Euclidian distance",
+    "IVQ index",
+    "Horizontal & vertical collectivitism - Aw index (Lieberson 1969)",
+    "index of qual variation (Mueller et al., 1970)",
+    "linguistic distance",
+    "genetic distance",
+    "expertise (patent classification) similar - cosine similarity",
+    "expertise diversity (based on past patents) - maximum pairwise distance",
+    "entropy - combines both",
+    "Cronbach's alpha between ranking of 54 values",
+    "Considers pair overlap, so both variety and separation",
+    "KAI problem solving approaches - range",
+    "knowledge overlap based on patenting history - mean of pairwise cosine similarities",
+    "Experience with specific customers - mean Euclidian distance",
+    "cognitive style (KAI) - range",
+    "Belbin team roles - Custom index, appears to reflect variety",
+    "binary - academic/non-academic. Balance between the two groups (1 - abs(p1-p2))"
+  )),
+  tibble(div_meas_type = "mixed", div_specific = c(
+    "average of age (coef var) and gender (Blau)",
+    "Averaged across age (SD), race, nationality (Blau)",
+    "std sum of gender (Blau) and age (coef var)",
+    "sum of function (Blau) and tenure (coef var)",
+    "sum of std CV (age) and std Blau (gender)",
+    "average of age and gender (unspecified & Teachman)",
+    "sum of  standardised Teachmans for gender and ethnicity + standardised SD for age",
+    "index, which was the sum of the following scores (standardized): the standard deviation of age, the standard deviation of tenure, gender diversity (using Pelled et al.’s [1999] measure), and Chinese ethnic diversity (again using Pelled et al.’s measure).",
+    "age and gender - entropy",
+    "Attneave's transmission measure - between net of within diversity"
+  )),
+  tibble(div_meas_type = "count", div_specific = c(
+    "Count (fixed team size)",
+    "number of nationalities on teams (of comparable size)",
+    "prior company affiliations - count",
+    "Number of classes patented in (for same employer)",
+    "number of foreign players",
+    "number of functional areas",
+    "number of functions",
+    "Number of functions",
+    "number of functions \"fully\" involved",
+    "number of nationalities",
+    "Number of sub-categories patented in (for same employer)",
+    "# categories",
+    "# categories - disability",
+    "# of functional areas / departments represented",
+    "# of functions",
+    "# of functions in team",
+    "# of professions in team",
+    "character strengths - count",
+    "count",
+    "count of functions",
+    "Count of professional groups in team",
+    "International playing experience - count of countries",
+    "team roles - count",
+    "functions of memgers \"fully\" involved - number"
+  )),
+  tibble(div_meas_type = "Teachman", div_specific = c(
+    "average of age and gender (Teachman)",
+    "average of Teachman",
+    "business unit - Teachman",
+    "Business unit diversity - Teachman",
+    "clustered into 5 regions - Teachman",
+    "composite of age, gender and nationality - Teachman",
+    "Entropy index (Teachman?)",
+    "FT - Teachman",
+    "general vs specialised education (confounded with level?) - Teachman",
+    "mean of Teachman",
+    "Normalized Teachman",
+    "religion - standardized Teachman",
+    "Standardised Teachman",
+    "Std Teachman",
+    "Teachman",
+    "Teachman / ln(n-cat)",
+    "Teachman of occupations",
+    "TMT - Teachman",
+    "White/non-White - Teachman"
+  )),
+  tibble(div_meas_type = "percentage", div_specific = c(
+    "% (M: 16%, SD: 10%)",
+    "% (M: 18%, SD: 15%)",
+    "% (M: 20%, SD: 12%)",
+    "% Chinese (M: 86%, SD: 16%)",
+    "% female (M = .41, SD = .20)",
+    "% female (M = 11%, SD = 18%)",
+    "% female (M: 11.9%, SD: 12.0%)",
+    "% female (M: 11%, SD: 15%)",
+    "% female (M: 12%, SD: 15%)",
+    "% female (M: 16%, SD: 13%)",
+    "% female (M: 17%, SD: 5%)",
+    "% female (M: 18%, SD: 20%)",
+    "% female (M: 2.64%, SD: 8.90%)",
+    "% female (M: 20%, SD: 28%)",
+    "% female (M: 21%, SD: 15%)",
+    "% female (M: 68%, SD: 9%)",
+    "% female (M: 79%, SD: 19%)",
+    "% female (M: 82%, SD: 12%)",
+    "% female executives (M: 15%, SD: 16%)",
+    "% female: M 0.1, SD 0.15",
+    "% females (M: 5.1%, SD: 10.0%)",
+    "% male (M = .89, SD = .13)",
+    "% male (M = 86%, SD = 18%)",
+    "% men (M 77%, SD 23%,  so correlations reversed)",
+    "% men (M 87%, SD 13%,  so correlations reversed)",
+    "% old ties, i.e. previous collaborations in past 3 years (M: 5%, SD: 7%)",
+    "% white (M: 80%, SD: 14%)",
+    "% women - M: .18, SD: .22",
+    "% women (M = 0.26, SD = 0.22)",
+    "% women (M = 20%, SD = 29%)",
+    "% women (M = 6%, SD = 13%)",
+    "% women (M: 11%, SD: 13%)",
+    "% women (M: 13%, SD: 15%)",
+    "% women (M: 17%, SD: 20%)",
+    "% women (M: 23%, SD: 12%)",
+    "% women (M: 6%, SD: 13%)",
+    "% women (M: 7.4%, SD: 11.7%)",
+    "% women (M: 8.5%, SD: 16.7%)",
+    "% women CEOs and VPs, M: 7.2%, SD: 15.6%",
+    "% women: M: 12%, SD: 19%",
+    "Share female (M, SD, range: 32.3 18.9 0 66.6)",
+    "%",
+    "% female (M: 6.3%, max: 40%)",
+    "% foreigners",
+    "% Male",
+    "% minority - M: 24%",
+    "% minority (i.e. 0 to 50)",
+    "% of women",
+    "% women (M <= 13%)",
+    "% women / 0.5",
+    "%females (M: 15.8%, 1 company > 50%)",
+    "1 - % of White men (i.e. gender & ethnicity combined)"
+  )),
+  tibble(div_meas_type = "sd", div_specific = c(
+    "\"at the job\" - SD",
+    "agreeableness - SD",
+    "agreeableness SD",
+    "anxious attachment - SD",
+    "avoidant attachment - SD",
+    "board - SD",
+    "cognitive ability (SAT/ACT) - SD",
+    "cognitive style (imagery and verbal preferences) - SD",
+    "collectivism - SD",
+    "company - SD",
+    "company, TMT and position somehow combined - SD",
+    "consciensciousness - SD",
+    "conscientiousness - SD",
+    "Determinism - SD",
+    "Doing-orientation - SD",
+    "emotional stability - SD",
+    "entrepreneurial passion - SD",
+    "entrepreneurial passion intensity - SD",
+    "experience as number of ideas contributed - SD",
+    "expertise - contribution level and variety on platform - SD",
+    "extraversion - SD",
+    "extraversion & openness to experience - SD",
+    "firm - SD",
+    "future-time perspective - SD",
+    "in position - SD",
+    "international experience - # of countries - SD",
+    "international experience - duration - SD",
+    "job - SD",
+    "KAI problem solving approaches - SD",
+    "locus of control - SD",
+    "locus of control - team SD",
+    "log SD",
+    "log size-adjusted SD",
+    "Need for achievement - SD",
+    "Need for affilitation - SD",
+    "Need for cognition - SD",
+    "Need for power - SD",
+    "negative trait affect - SD",
+    "number of patents registered (i.e. work experience & success) - SD",
+    "on platform - SD",
+    "openness SD",
+    "openness to exp - SD",
+    "openness to experience - SD",
+    "Openness to experience - SD",
+    "org - SD",
+    "Org tenure - SD",
+    "organisation - SD",
+    "organisation (length of prior military experience) - SD",
+    "pacing style - SD",
+    "pacing style (deadline vs early) - SD",
+    "patenting experience in # patens - SD",
+    "patenting experience in years - SD",
+    "polychronicity - SD",
+    "position - SD",
+    "positive trait affect - SD",
+    "power-distance - SD",
+    "proactive personality - SD",
+    "relationship-oriented (agreeable, extraversion & emot stability) - SD",
+    "relationship-oriented dimensions - SD",
+    "Risk taking - SD",
+    "SD",
+    "SD (Hofstede - specific dimensions unclear)",
+    "SD (of 4 categories)",
+    "SD in education",
+    "SD of dummy variable",
+    "SD of educational level within group members",
+    "SD on Hofstede's national culture dimensions",
+    "self-efficacy - SD",
+    "spiritual maturity - SD",
+    "sum of item SD / team size",
+    "Sum of SDs on two learning style dimensions",
+    "sum of SDs per 3 styles",
+    "T1 - SD",
+    "T10 - SD",
+    "T11 - SD",
+    "T2 - SD",
+    "T3 - SD",
+    "T4 - SD",
+    "T5 - SD",
+    "T6 - SD",
+    "T7 - SD",
+    "T8 - SD",
+    "T9 - SD",
+    "task-oriented (openness & conscientiousness) - SD",
+    "task-oriented dimensions - SD",
+    "team - SD",
+    "team -SD",
+    "team SD",
+    "time urgence - SD",
+    "time urgency - SD",
+    "time-urgency - SD",
+    "traditionalism values - SD",
+    "trait positive affect - SD (rather than coef var because variable is interval, not ratio)",
+    "transformational leadership - SD",
+    "work ethic values - SD",
+    "work experience in related career - SD"
+  )),
+  tibble(div_meas_type = "coef_var", div_specific = c(
+    "% of career in current industry - coef var",
+    "acquired TMT - coef var",
+    "acquiring TMT - coef var",
+    "all players - coef var",
+    "bias-corrected coef var",
+    "both (i.e. sum?) team & organisation - coef var",
+    "causal importance buffering - sum coef var",
+    "causal importance external perceptions - sum coef var",
+    "causal importance high quality workforce - sum coef var",
+    "causal importance innovation - sum coef var",
+    "causal importance preparedness - sum coef var",
+    "coef",
+    "coef of var",
+    "coef vaar",
+    "coef var",
+    "coef var (\"SD coefficient\")",
+    "coef var (for 10-year categories)",
+    "coef variation",
+    "collectivism v individualism - coef var",
+    "company - coef var",
+    "company & industry tenure - coef var",
+    "company tenure - coef var",
+    "creative imaginativeness - coef var",
+    "dark triad - coef var",
+    "entrepreneurial skill - coef var",
+    "experience as RN - coef var",
+    "Family - coef var",
+    "firm - coef var",
+    "firm tenure - coef var",
+    "goals - coef var",
+    "HR preferences - sum coef var",
+    "ideology - measured with Republican/Democrat donations - coef var",
+    "in the function - coef var",
+    "in the team - coef var",
+    "industry experience - coef var",
+    "industry experience in years  - coef var",
+    "international experience - # of countries - coef var",
+    "international experience - duration - coef vaar",
+    "international experience - duration - coef var",
+    "key players - coef var",
+    "log(coef var(years))",
+    "log(coef var)",
+    "management skills - coef var",
+    "metacognitive experience diversity - adjusted coef var",
+    "metacognitive knowledge diversity - adjusted coef var",
+    "Non-family - coef var",
+    "Openness to experience - coef var",
+    "org - coef var",
+    "org - number of edits - coef var log",
+    "organisation - coef var",
+    "practical imaginativeness - coef var",
+    "profitability preferenes - sum coef var",
+    "project - coef var",
+    "social imaginativeness - coef var",
+    "sum of coef vars on Hofstede's 4 dimensions (thus based on nationality)",
+    "system maintenance preferences - sum coef var",
+    "team - coef var",
+    "team (current position) - coef var",
+    "team tenure - coef var",
+    "team tenure - log coef var",
+    "tenure in TMT - coef var",
+    "work experience - coef var",
+    "work values questionnaire - coef var",
+    "years - coef var",
+    "years of schooling - coef var",
+    "years of work experience - coef var",
+    "Coef Var",
+    "Coefficient of variation"
+  )),
+  tibble(div_meas_type = "variance", div_specific = c(
+    "agreeableness - variance",
+    "Agreeableness - variance",
+    "autonomy - variance",
+    "cognitive style - object visualisation, within-group variance",
+    "cognitive style - spatial visualisation, within-group variance",
+    "conscientiousness - variance",
+    "Conscientiousness - variance",
+    "emotional stability - variance",
+    "Emotional stability - variance",
+    "extraversion - variance",
+    "Extraversion - variance",
+    "GMA - variance",
+    "national relationship orientation - variance",
+    "national uncertainy avoidance - variance",
+    "openness to experience - variance",
+    "Openness to experience - variance",
+    "sum of variance on each Big-5 factors",
+    "sum of variance on three cognitive ability tests",
+    "trait EI: emotion appraisal - variance",
+    "trait EI: emotion regulation - variance",
+    "trait EI: optimism/mood regulation - variance",
+    "variance",
+    "Variance"
+  )),
+  tibble(div_meas_type = "binary_splits", div_specific = c(
+    "Binary - less than 75% at same level -> diverse",
+    "Binary - less than 75% in same age group -> diverse",
+    "Binary - 100% white vs diverse",
+    "binary - homogenous vs mixed",
+    "binary - mixed vs homogenour",
+    "dummy - 0 no vs 1 any foreigners",
+    "KAI problem solving approaches - homogenous vs heterogeneous groups",
+    "Mixed vs academics",
+    "mixed vs female authors",
+    "mixed vs female-only",
+    "mixed vs male authors",
+    "mixed vs none",
+    "Mixed vs practitioners",
+    "mixed vs some",
+    "National individualism vs collectivism",
+    "Number of women: 1 vs 0",
+    "Number of women: 2 vs 0",
+    "Number of women: 2 vs 1",
+    "Number of women: 3 vs 0",
+    "Number of women: 3 vs 1",
+    "Number of women: 3 vs 2",
+    "some vs none",
+    "Swedish vs foreign",
+    "Type A vs Type B - manipulated homogenous v heterogeneous",
+    "binary - any women",
+    "scientific discipline - manipulated into multi- or unidisciplinary",
+    "Any females - dummy",
+    "Any TMT foreign work experience - dummy",
+    "diummy - mixed v single-gender",
+    "dummy - at least 1 woman",
+    "Dummy - female founders yes/no",
+    "Dummy - non-academic founder",
+    "dummy - none/any",
+    ">= 2 minority-members on TMT",
+    ">= 2 women on TMT",
+    "1+ female (binary)",
+    "manipulated - interdisciplinary or homogenous",
+    "dichotomous - any women",
+    "binary - any on TMT",
+    "binary - any top-team women?",
+    "Binary - diverse v homogenou",
+    "binary - homogenous v mixed",
+    "binary - manipulated",
+    "binary - not mono-ethnic",
+    "binary - not single-gender",
+    "binary - yes/no",
+    "Binary measure",
+    "Binary split (median'ish' split by SD)",
+    "binary split using k-means"
+  ))
+)
+
+dataset <- dataset %>% left_join(div_classification, by = "div_specific")
+```
+
+```{r}
+dataset$domain_and_sub <- paste(dataset$domain, dataset$sub_dom, sep = " - ")
+
+dataset %>%
+  count(div_meas_type) %>%
+  rename(`Diversity measure` = div_meas_type) %>%
+  mutate(`%` = n / sum(n)) %>%
+  arrange(desc(n)) %>%
+  gt() %>%
+  fmt_percent(3, decimals = 1) %>%
+  gt_apa_style() %>% 
+  tab_header(title = "Distribution of diversity measures across the dataset")
+
+dataset %>%
+  filter(!is.na(sub_dom) & sub_dom != "other") %>%
+  count(domain_and_sub, div_meas_type) %>%
+  group_by(domain_and_sub) %>%
+  mutate(`%` = n / sum(n)) %>%
+  arrange(domain_and_sub, desc(n)) %>%
+  filter(`%` > 0.05) %>%
+  group_by(domain_and_sub) %>%
+  rename(`Diversity measure` = div_meas_type) %>%
+  gt() %>%
+  fmt_percent(4, decimals = 1) %>%
+  gt_apa_style() %>% 
+  tab_header(title = "Distribution of diversity measures per sub-domain")
+
+dataset %>%
+  filter(!is.na(sub_dom) & sub_dom != "other", !is.na(meas_type)) %>%
+  count(domain_and_sub, meas_type) %>%
+  group_by(domain_and_sub) %>%
+  mutate(`%` = n / sum(n)) %>%
+  arrange(domain_and_sub, desc(n)) %>%
+  rename(`Diversity concept` = meas_type) %>%
+  group_by(domain_and_sub) %>%
+  gt() %>%
+  fmt_percent(4, decimals = 1) %>%
+  gt_apa_style() %>% 
+  tab_header(title = "Distribution of diversity conceptualizations per sub-domain")
+
+```
+
+
+Given the very strong association between the sub-domains and the conceptualisation of diversity, overall tests of the relationship between diversity conceptualisation and effect size are likely uninformative. Therefore, we focused on the relationship between the diversity conceptualization and effect size within the three sub-domains where both variety and separation measures accounted for at least 10% of effect sizes - specifically educational level, age and tenure.
+
+```{r}
+dataset_filtered <- dataset %>%
+  filter(sub_dom %in% c("age", "educational level", "tenure"),
+         meas_type %in% c("Variety", "Separation")) %>%
+  mutate(domain = sub_dom)
+
+meas_type <- single_cat_moderator_test("meas_type", dataset_filtered)
+cat_plots(list(meas_type = meas_type))[[1]]$plot
+meas_type$moderator_test  %>% transmute(domain = domain %>% str_remove("domain"), 
+                                                        Wald = glue::glue("F ({df_num}, {round_(df_denom, 1)}) = {round_(Fstat, 2)}"), 
+                                                        p = paste(fmt_p(p_val, equal_sign = FALSE), sigstars(p_val))) %>% 
+  gt() %>% gt_apa_style() %>% tab_header(title = "Moderator tests for separation vs variety conceptualisation") %>% 
+  fmt_markdown(columns = c(p), rows = everything())
+
+meas_type$meta_models$mod_domains_no_int %>% conf_int("CR2") %>% as_tibble() %>% transmute(Coef, r = glue::glue("{round_(beta, 3)} [{round_(CI_L, 3)}, {round_(CI_U, 3)}]")) %>% separate(Coef, into = c("Sub-domain", "Measure"), sep = ":") %>% 
+  mutate(`Sub-domain` = `Sub-domain` %>% str_remove("domain"), Measure = Measure %>% str_remove("meas_type")) %>%
+  group_by(`Sub-domain`) %>%
+  gt() %>% gt_apa_style() %>% tab_header(title = "Estimated correlations for separation vs variety conceptualisation")
+```
+
+# R&D
+
+```{r warning=FALSE}
+dataset$r_and_d <- dataset$team_function == "R & D / Research"
+r_and_d <- single_cat_moderator_test("r_and_d", dataset)
+
+r_and_d$moderator_test %>% as_tibble() %>% transmute(domain = domain %>% str_remove("domain"), 
+                                                        Wald = glue::glue("F ({df_num}, {round_(df_denom, 1)}) = {round_(Fstat, 2)}"), 
+                                                        p = paste(fmt_p(p_val, equal_sign = FALSE), sigstars(p_val))) %>% 
+  gt() %>% gt_apa_style() %>% tab_header(title = "Moderator tests for R&D vs other teams")
+
+cat_plots(list(r_and_d = r_and_d))[[1]]$plot + labs(subtitle = "R&D (TRUE) vs other teams (FALSE)")
+
+r_and_d$meta_models$mod %>% conf_int("CR2") %>% as_tibble() %>% transmute(Coef, r = glue::glue("{round_(beta, 3)} [{round_(CI_L, 3)}, {round_(CI_U, 3)}]")) %>% 
+  gt() %>% gt_apa_style() %>% tab_header(title = "Estimated correlations for R&D vs other teams")
+```
+
+# Outcome category
+
+```{r}
+firm_financial_performance <- c(
+  "Adaptive firm performance (return on equity Q4 2020 - Q1 2020)",
+  "Adjusted ROA t+2/3 years (deviation from industry median)",
+  "Annual employment growth",
+  "Annual stock price increase",
+  "Asset growth",
+  "Asset turnover",
+  "Asset turnover ratio",
+  "BHAR",
+  "Buy-and-hold abnormal returns (BHAR)",
+  "Cash flow / assets",
+  "Cash flow/share",
+  "Change in market share",
+  "Change in profits",
+  "Change in profits (std by product line)",
+  "Change in sales (std by product line)",
+  "Comparable sales",
+  "Controllable profit",
+  "Controllable profit (t+1)",
+  "Earnings per share",
+  "Earnings per share (t+1)",
+  "Earnings per share (t+3)",
+  "EBIT",
+  "EBITDA margin",
+  "Economic value added (EVA - t+1)",
+  "Econonomic Value Added (EVA)",
+  "Employee growth",
+  "Employee productivity (log net profict)",
+  "Employee productivity (log net profit)",
+  "Employee productivity: log revenue / employees",
+  "Employment growth",
+  "Employment Growth",
+  "Financial Distress",
+  "Financial performance",
+  "Financial performance (mean ROA, ROE & ROS)",
+  "Financial performance (returns & write-offs)",
+  "Firm net income",
+  "Firm performance",
+  "Firm Performance",
+  "Firm performance - M/B ratio",
+  "Firm performance - ROA",
+  "Firm performance (ROA, ROA and ROS combined)",
+  "Firm performance (t+1)",
+  "Firm performance (Tobin's q)",
+  "Free cash flow",
+  "Gross profit %",
+  "Growth",
+  "Growth performance",
+  "Growth rate of fixed assets between 2004 and 2007",
+  "Industry-adjusted profitability (means of ROA, ROE, ROS)",
+  "Industry-adjusted return on assets",
+  "Industry-adjusted ROA",
+  "Industry-adjusted ROA in turnaround period",
+  "Industry-adjusted ROE (t+2)",
+  "Industry-adjusted sales growth",
+  "Industry-adjusted Tobin's Q",
+  "Labor productivity (sales per FTE)",
+  "Labour productivity (log operating income / employee)",
+  "Labour productivity (t+1)",
+  "Log net income",
+  "Log return on assets",
+  "Log return on sales",
+  "log ROA",
+  "log sales",
+  "Log sales per employee",
+  "Log Tobin's Q",
+  "Market-adjusted stock returns",
+  "Net cash flow",
+  "Net income after tax/assets",
+  "Net profit margin",
+  "Net return to shareholders",
+  "Operating income/assets",
+  "Operating margin",
+  "Operating profit",
+  "Organizational performance - return on asset (ROA)",
+  "Organizational performance - return on asset\n(ROA)",
+  "Performance - % of maximum profit T1",
+  "Performance - % of maximum profit T2",
+  "Performance - % of maximum profit T3",
+  "Performance - average of std ROA, ROS and ROE",
+  "Performance (profits, growth, market share)",
+  "Profit growth (vs sub-sector)",
+  "Profit margin",
+  "Profitability",
+  "Profits",
+  "Profits per share",
+  "Return on assets",
+  "Return on Assets",
+  "Return on assets (\"short term\")",
+  "Return on assets (t+1)",
+  "Return on assets (t+2)",
+  "Return on assets / industry ROA",
+  "Return on equity (ROE) |",
+  "Return on equity (t+1)",
+  "Return on sales (maybe relative, not clearly reported)",
+  "Return on sales (t+1)",
+  "Return on assets ('short term')",
+  "Return on assets (3-year average)",
+  "Return on Assets (3-year average)",
+  "Return on assets (3-year avg)",
+  "Return on assets (5-year average)",
+  "Return on assets (adjusted by taxation strategy)",
+  "Return on assets (maybe relative, not clearly reported)",
+  "return on assets (ROA)",
+  "Return on assets (ROA)",
+  "Return on assets (t + 1)",
+  "Return on assets (t + 1) - log",
+  "Return on assets (t) - log",
+  "Return on assets (t+1 and t+2)",
+  "Return on assets (t+1 to t+3)",
+  "Return on assets invested",
+  "Return on equity",
+  "Return on equity (ROE)",
+  "Return on equity (t+1 and t+2)",
+  "Return on invested capital (ROIC)",
+  "Return on investment",
+  "Return on sales",
+  "Return on Sales",
+  "Return on sales (2-year avg)",
+  "Return on total assets (ROTA)",
+  "Revenue growth",
+  "ROA",
+  "ROA (1 year)",
+  "ROA (3 years)",
+  "ROA growth (1 year)",
+  "ROA growth (3 years)",
+  "ROA growth to t+2 years",
+  "ROA improvement (2004-2006) - (2000-2002)",
+  "ROE",
+  "ROE (1 year)",
+  "ROE (3 years)",
+  "ROE growth (1 year)",
+  "ROE growth (3 years)",
+  "ROE resilience (change post-pre crisis)",
+  "ROI",
+  "Sales",
+  "Sales growth",
+  "Sales Growth",
+  "Sales growth (1 year)",
+  "Sales growth (3 years)",
+  "Sales volume",
+  "Stock return index",
+  "Tobin's q",
+  "Tobin's Q",
+  "Tobin's q (\"long term\")",
+  "Tobin's q (industry-adjusted)",
+  "Tobin's q (log)",
+  "Tobin's q (market valuation)",
+  "Tobin's q (or rather market-to-book ratio)",
+  "Tobin's q (t+2)",
+  "Tobin's Q1",
+  "Tobin's Q2",
+  "Tobins Q",
+  "Total return to shareholders"
+)
+creativity_innovation <- c( # Exclude patent-based, as they also measure strategy/org capabilities etc
+  "Administrative innovation adoption",
+  "Ambidexterity (sum of exploration and exploitation)",
+  "Commercialised innovations (new products)",
+  "Creative flexibility (number of categories)",
+  "Creative fluency",
+  "Creative fluency (number of ideas)",
+  "Creative quality",
+  "Creative Success",
+  "Creativity",
+  "creativity",
+  "Creativity (number * quality of ideas)",
+  "Group creativity",
+  "Idea development",
+  "Idea generation",
+  "Ideas generated",
+  "Ideas generated per members",
+  "Ideation contest won",
+  "Incremental innovation",
+  "Innovation",
+  "Innovation - improved products",
+  "Innovation - new products",
+  "Innovation - no of patent applications",
+  "Innovation (measured based on frequency in interviews)",
+  "Innovation (no of successful new products/business opportunities)",
+  "Innovation (quality & quantity)",
+  "Innovation (rated by internal customers)",
+  "Innovation impact (forward citations)",
+  "Innovation implementation",
+  "Innovation performance",
+  "Innovation performance (patent citations over 3 years)",
+  "Innovation quality",
+  "Innovation quantity",
+  "Innovative performance",
+  "Innovative performance (product/solution design)",
+  "Innovativeness",
+  "Invention impact - forward citations",
+  "Level of innovation",
+  "Manufacturing innovation",
+  "New product creativity",
+  "Novelty",
+  "Number of ideas",
+  "Organizational innovation (number of innovations)",
+  "Originality",
+  "Originality Brainstorming",
+  "Originality Construction",
+  "Process innovation",
+  "Product innovation",
+  "Product innovation past 3 years - binary",
+  "Product innovativeness",
+  "R&D performance",
+  "Radical innovation",
+  "Software quality",
+  "Team creativity",
+  "team creativity",
+  "Team innovation",
+  "Technical innovation adoption",
+  "Technical innovation performance",
+  "Technical innovations",
+  "innovativeness",
+  "log Management innovation",
+  "log Process innovation",
+  "log Product innovation",
+  "Org innovation",
+  "Team innovation - number of projects",
+  "Quality of ideas",
+  "Quantity of ideas"
+)
+
+dataset <- dataset %>% mutate(
+  creativity = name_perf %in% creativity_innovation,
+  firm_level_financial = name_perf %in% firm_financial_performance
+)
+
+creativity <- single_cat_moderator_test("creativity", dataset)
+financial <- single_cat_moderator_test("firm_level_financial", dataset)
+creativity$moderator_test %>% as_tibble() %>% transmute(domain = domain %>% str_remove("domain"), 
+                                                        Wald = glue::glue("F ({df_num}, {round_(df_denom, 1)}) = {round_(Fstat, 2)}"), 
+                                                        p = paste(fmt_p(p_val, equal_sign = FALSE), sigstars(p_val))) %>% 
+  gt() %>% gt_apa_style() %>% tab_header(title = "Moderator tests for creativity vs other outcomes")
+financial$moderator_test %>% as_tibble() %>% transmute(domain = domain %>% str_remove("domain"), 
+                                                        Wald = glue::glue("F ({df_num}, {round_(df_denom, 1)}) = {round_(Fstat, 2)}"), 
+                                                        p = paste(fmt_p(p_val, equal_sign = FALSE), sigstars(p_val))) %>% 
+  gt() %>% gt_apa_style() %>% tab_header(title = "Moderator tests for financial performance vs other outcomes")
+
+ps <- cat_plots(list(creativity = creativity, financial = financial))
+
+imap(ps, ~.x$plot + labs(subtitle = str_to_title(paste(.y, "performance")))) %>% wrap_plots()
+
+conf_int(financial$meta_models$mod, "CR2") %>%
+  as_tibble() %>%
+  transmute(Coef, r = glue::glue("{round_(beta, 3)} [{round_(CI_L, 3)}, {round_(CI_U, 3)}]")) %>% 
+  gt() %>% gt_apa_style() %>% tab_header(title = "Estimated correlations for financial performance vs other outcomes")
+
+
+conf_int(creativity$meta_models$mod, "CR2") %>%
+  as_tibble() %>%
+  transmute(Coef, r = glue::glue("{round_(beta, 3)} [{round_(CI_L, 3)}, {round_(CI_U, 3)}]")) %>% 
+  gt() %>% gt_apa_style() %>% tab_header(title = "Estimated correlations for creativity vs other outcomes")
+
+```
+
+# Association between citations and outcomes
+
+Across 12 model specifications (citations or log-transformed citations x all or only largest effects x operationalization of outcomes), we found no evidence for the suggestion that reports containing positive/large/significant effects are cited more often. However, it needs to be noted that this is based on the correlations, not on the specific effect sizes reported in the papers.
+
+## With raw citation counts
+
+### With all effect sizes
+
+```{r}
+V <- with(dataset %>% filter(art_focus == "focal H"), 
+          impute_covariance_matrix(vi = var_adj,
+                                   cluster = articlestudy,
+                                   r = rho))
+
+```
+
+#### Prediction from effect size
+
+Tests whether citations are skewed towards positive effects
+
+```{r}
+
+meta_model_positive <- rma.mv(citation_count ~ r_adj + year + pub_status + language,
+                    V = V,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H"),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE,
+                  control=list(optimizer="Nelder-Mead")) # Needed to achieve convergence here
+
+coef_test(meta_model_positive, "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+```
+
+#### Prediction from absolute effect size
+
+Tests whether citations are skewed towards larger effects
+
+```{r}
+
+meta_model_abs <- rma.mv(citation_count ~ r_adj_abs + year + pub_status + language,
+                    V = V,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(r_adj_abs = abs(r_adj)),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE,
+                  control=list(optimizer="Nelder-Mead"))
+
+ coef_test(meta_model_abs, "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+```
+
+#### Prediction from significance
+
+Tests whether citations are skewed to significant effects
+
+```{r}
+meta_model_sig <- rma.mv(citation_count ~ significant + year + pub_status + language,
+                    V = V,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(p = 2 * (1 - pt(abs(r_adj/se), n_teams - 2)),
+                                                                                 significant = p < .05),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE,
+                  control=list(optimizer="Nelder-Mead"))
+
+coef_test(meta_model_sig,  "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+
+```
+
+### With largest effect size per study
+
+The largest effect size in a study might provide a reason for citing it, so we repeat the analysis with only largest effect size per study.
+
+```{r}
+V2 <- with(dataset %>% filter(art_focus == "focal H") %>% mutate(citation_count = log(citation_count + 1), r_adj_abs = abs(r_adj)) %>% 
+                      group_by(articlestudy) %>% arrange(desc(r_adj_abs)) %>% slice_head(n = 1), 
+          impute_covariance_matrix(vi = var_adj,
+                                   cluster = articlestudy,
+                                   r = rho))
+```
+
+#### Prediction from effect size
+
+Tests whether citations are skewed towards positive effects
+
+```{r}
+meta_model_pos <- rma.mv(citation_count ~ r_adj + year + pub_status + language,
+                    V = V2,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(r_adj_abs = abs(r_adj)) %>% 
+                      group_by(articlestudy) %>% arrange(desc(r_adj_abs)) %>% slice_head(n = 1),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE,
+                  control=list(optimizer="Nelder-Mead"))
+
+coef_test(meta_model_pos,  "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+```
+
+#### Prediction from absolute effect size
+
+Tests whether citations are skewed towards larger effects
+
+```{r}
+
+meta_model_abs <- rma.mv(citation_count ~ r_adj_abs + year + pub_status + language,
+                    V = V2,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(r_adj_abs = abs(r_adj)) %>% 
+                      group_by(articlestudy) %>% arrange(desc(r_adj_abs)) %>% slice_head(n = 1),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE,
+                  control=list(optimizer="Nelder-Mead"))
+
+ coef_test(meta_model_abs, "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+
+```
+
+#### Prediction from significance
+
+Tests whether citations are skewed to significant effects
+
+```{r}
+
+meta_model_sig <- rma.mv(citation_count ~ significant + year + pub_status + language,
+                    V = V2,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(p = 2 * (1 - pt(abs(r_adj/se), n_teams - 2)),
+                                                                                 significant = p < .05) %>% 
+                      group_by(articlestudy) %>% arrange(desc(significant), desc(abs(r_adj))) %>% slice_head(n = 1),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE,
+                  control=list(optimizer="Nelder-Mead"))
+
+coef_test(meta_model_sig,  "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+
+```
+
+## With log-transformed citation counts
+
+### With all effect sizes
+
+```{r}
+V <- with(dataset %>% filter(art_focus == "focal H"), 
+          impute_covariance_matrix(vi = var_adj,
+                                   cluster = articlestudy,
+                                   r = rho))
+```
+
+#### Prediction from effect size
+
+Tests whether citations are skewed towards positive effects
+
+```{r}
+meta_model_positive <- rma.mv(log_citation_count ~ r_adj + year + pub_status + language,
+                    V = V,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(log_citation_count = log(citation_count + 1)),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+coef_test(meta_model_positive,  "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+```
+
+#### Prediction from absolute effect size
+
+Tests whether citations are skewed towards larger effects
+
+```{r}
+
+meta_model_abs <- rma.mv(log_citation_count ~ r_adj_abs + year + pub_status + language,
+                    V = V,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(log_citation_count = log(citation_count + 1), r_adj_abs = abs(r_adj)),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+print("Predicting log citation counts from absolute effect size (so are citations skewed to large effects?)")
+
+ coef_test(meta_model_abs, "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+```
+
+#### Prediction from significance
+
+Tests whether citations are skewed to significant effects
+
+```{r}
+meta_model_sig <- rma.mv(log_citation_count ~ significant + year + pub_status + language,
+                    V = V,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(log_citation_count = log(citation_count + 1), 
+                                                                                 p = 2 * (1 - pt(abs(r_adj/se), n_teams - 2)),
+                                                                                 significant = p < .05),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+coef_test(meta_model_sig,  "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+```
+
+### With largest effect size per study
+
+```{r}
+V2 <- with(dataset %>% filter(art_focus == "focal H") %>% mutate(log_citation_count = log(citation_count + 1), r_adj_abs = abs(r_adj)) %>% 
+                      group_by(articlestudy) %>% arrange(desc(r_adj_abs)) %>% slice_head(n = 1), 
+          impute_covariance_matrix(vi = var_adj,
+                                   cluster = articlestudy,
+                                   r = rho))
+```
+
+#### Prediction from effect size
+
+Tests whether citations are skewed towards positive effects
+
+```{r}
+meta_model_pos <- rma.mv(log_citation_count ~ r_adj + year + pub_status + language,
+                    V = V2,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(log_citation_count = log(citation_count + 1), r_adj_abs = abs(r_adj)) %>% 
+                      group_by(articlestudy) %>% arrange(desc(r_adj_abs)) %>% slice_head(n = 1),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+coef_test(meta_model_pos,  "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+```
+
+#### Prediction from absolute effect size
+
+Tests whether citations are skewed towards larger effects
+
+```{r}
+
+meta_model_abs <- rma.mv(log_citation_count ~ r_adj_abs + year + pub_status + language,
+                    V = V2,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(log_citation_count = log(citation_count + 1), r_adj_abs = abs(r_adj)) %>% 
+                      group_by(articlestudy) %>% arrange(desc(r_adj_abs)) %>% slice_head(n = 1),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+coef_test(meta_model_abs, "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+```
+
+#### Prediction from significance
+
+Tests whether citations are skewed to significant effects
+
+```{r}
+
+meta_model_sig <- rma.mv(log_citation_count ~ significant + year + pub_status + language,
+                    V = V2,
+                    random = ~ 1 | articlestudy, # Dropping effect_id, as the outcome is at the articlestudy level
+                    data = dataset %>% filter(art_focus == "focal H") %>% mutate(log_citation_count = log(citation_count + 1), 
+                                                                                 p = 2 * (1 - pt(abs(r_adj/se), n_teams - 2)),
+                                                                                 significant = p < .05) %>% 
+                      group_by(articlestudy) %>% arrange(desc(significant), desc(abs(r_adj))) %>% slice_head(n = 1),
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+coef_test(meta_model_sig,  "CR2") %>% as_tibble() %>% round_df(3) %>% mutate(p_Satt = fmt_p(p_Satt, equal_sign = FALSE))
+
+```

@@ -1,0 +1,295 @@
+---
+title: "Diversity and team-performance meta-analysis"
+description: null
+output:
+  html_document:
+    theme: united
+    toc: yes
+    code_folding: hide
+  pdf_document:
+    fig_height: 6
+    fig_width: 8
+Author: Lukas Wallrich 
+---
+
+# Overview
+
+This file runs the main effect meta-analysis.
+
+```{r setup, message=FALSE}
+# For reproducibility package versions are locked to a specific date
+if (!require(groundhog)) install.packages('groundhog')
+groundhog::groundhog.library(c("readxl", "metaforest", "metafor", "tidyverse", "clubSandwich", "cli", "rsprite2", "esc",
+                               "mice", "metacart", "gt", "gtExtras", "psych", "furrr", "progressr"), date = "2023-07-09")
+groundhog::groundhog.library(c("lukaswallrich/timesaveR"), date = "2023-07-09")
+
+source("helpers/helpers.R")
+source("helpers/equivalence_testing.R")
+
+dataset <- read_rds("data/full_dataset.rds")
+# Assumed correlation between dependent effect sizes
+rho <- 0.6
+```
+
+# Main meta-analysis
+
+```{r main, message=FALSE}
+# Estimate covariance matrix for CHE meta-analysis, following Harrer:
+# https://bookdown.org/MathiasHarrer/Doing_Meta_Analysis_in_R/multilevel-ma.html#fit-rve
+
+V <- with(dataset, 
+          impute_covariance_matrix(vi = var_adj,
+                                   cluster = articlestudy,
+                                   r = rho))
+
+meta_model_intercept <- rma.mv(r_adj ~ 1,
+                    V = V,
+                    random = ~ 1 | articlestudy/effect_id,
+                    data = dataset,
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+meta_model <- rma.mv(r_adj ~ 1,
+                    V = V,
+                    random = ~ 1 | articlestudy/effect_id,
+                    data = dataset,
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+meta_model_intercept_dom <- rma.mv(r_adj ~ 1 + domain,
+                    V = V,
+                    random = ~ 1 | articlestudy/effect_id,
+                    data = dataset,
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+meta_model_dom <- rma.mv(r_adj ~ 0 + domain,
+                    V = V,
+                    random = ~ 1 | articlestudy/effect_id,
+                    data = dataset,
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+# Calculate credibility intervals, following James Pustejovsky
+# https://stat.ethz.ch/pipermail/r-sig-meta-analysis/2019-April/001508.html
+
+confidence_intervals <- conf_int(meta_model_intercept, vcov = "CR2", p_values = TRUE) %>% 
+    mutate(`equiv_.1` = get_p_value(meta_model_intercept, "intrcpt", sesoi = .1),
+         `equiv_.05` = get_p_value(meta_model_intercept, "intrcpt", sesoi = .05),
+         cred_upper = beta + 1.282 * sqrt(sum(meta_model_intercept$sigma2) + SE^2),
+         cred_lower = beta - 1.282 * sqrt(sum(meta_model_intercept$sigma2) + SE^2),
+         Coef = "Overall") %>% 
+  bind_rows(conf_int(meta_model_dom, vcov = "CR2", p_values = TRUE) %>% 
+              rowwise() %>%
+
+  mutate(`equiv_.1` = get_p_value(meta_model_dom, Coef, sesoi = .1),
+         `equiv_.05` = get_p_value(meta_model_dom, Coef, sesoi = .05)) %>% 
+  ungroup() %>% 
+    mutate( cred_upper = beta + 1.282 * sqrt(sum(meta_model_dom$sigma2) + SE^2),
+         cred_lower = beta - 1.282 * sqrt(sum(meta_model_dom$sigma2) + SE^2))) %>% 
+  as_tibble()
+
+confidence_intervals  %>% write_rds("data/main_meta_res.rds")
+```
+
+## Report average effects and heterogeneity
+
+```{r results='hide'}
+meta_summary <- summary(meta_model_intercept) %>% capture.output()
+meta_summary_dom <- summary(meta_model_dom)  %>% capture.output()
+meta_summary_intercept_dom <- summary(meta_model_intercept_dom)  %>% capture.output()
+
+R2_diff <- pseudo_R2(meta_model_intercept, meta_model_intercept_dom)
+
+I2s <- mlm.variance.distribution(meta_model_intercept)
+```
+
+### Bootstrap R2 contribution of domain
+
+```{r message=FALSE}
+boot_R2_domain <- function(dat, indices) {
+  p()
+  data <- dat[indices, ]
+
+  # Null models for R2
+  V <- with(
+    data,
+    impute_covariance_matrix(
+      vi = var_adj,
+      cluster = articlestudy,
+      r = rho
+    )
+  )
+
+  mod_null <- try(suppressWarnings(rma.mv(r_adj ~ 1,
+    V = V,
+    random = ~ 1 | articlestudy / effect_id,
+    test = "t",
+    dfs = "contain",
+    data = data,
+    sparse = TRUE
+  )))
+
+  mod_domains <- try(suppressWarnings(rma.mv(r_adj ~ domain,
+    V = V,
+    random = ~ 1 | articlestudy / effect_id,
+    test = "t",
+    dfs = "contain",
+    data = data,
+    sparse = TRUE
+  )))
+
+  if (inherits(mod_null, "try-error") || inherits(mod_domains, "try-error")) {
+    NA
+  } else {
+    if (sum(mod_null$sigma2) > 0) {
+      max(0, 100 * (sum(mod_null$sigma2) - sum(mod_domains$sigma2)) / sum(mod_null$sigma2))
+    } else {
+      # catch cases where sum(res0$sigma2) is 0, to avoid -Inf (if sum(res1$sigma2)
+      # is positive) or NaN (if sum(res1$sigma2) is also 0) for R^2; for such cases,
+      # define R^2 to be 0
+      0
+    }
+  }
+}
+
+library(boot)
+if (file.exists("data/bs_R2_domain.rds")) {
+  bs_R2_domain <- read_rds("data/bs_R2_domain.rds")
+} else {
+  job::job("Bootstrapping R2 domains" = {
+  with_progress({
+    set.seed(1234)
+    R <- 5000 #At least nrow(dataset) + 1 needed for bca confidence intervals (see https://bugs.r-project.org/show_bug.cgi?id=18647), though that takes 4 hrs (M2 Macbook)
+    p <- progressor(steps = R + 1, label = "Bootstrapping R2s")
+    system.time(bs_R2_domain <- boot(dataset, boot_R2_domain, R = R, ncpus = 7, parallel = "multicore"))
+    write_rds(bs_R2_domain, "data/bs_R2_domain.rds")
+  })
+  })
+  bs_R2_domain <- `Bootstrapping R2 domains`$bs_R2_domain
+}
+
+  ci <- extract_boot_ci(boot.ci(bs_R2_domain, type = "bca"))
+  R2_equiv_domains <- tibble(R2 = bs_R2_domain$t0, CI_L = ci$CI_L, CI_U = ci$CI_U, p_val_equiv = boot_get_equiv_p(bs_R2_domain, sesoi = 5, ci_type = "bca"))
+
+ks <- dataset %>% 
+  count(Domain = domain) %>% 
+  bind_rows(summarise(., n = sum(n), Domain = "Overall")) %>% 
+  rename(`*k*` = n)
+
+main_meta_table <- confidence_intervals %>% 
+  mutate(Domain = Coef %>% str_remove("domain") %>% str_replace("_", "-"),
+         `*r*` = paste(fmt_cor(beta, 3), fmt_ci(CI_L, CI_U, 3), sigstars(p_val)),
+         `|*r*| < .1` = fmt_p(`equiv_.1`),
+         `|*r*| < .05` = fmt_p(`equiv_.05`),
+         `Credibility\ninterval` = fmt_ci(cred_lower, cred_upper, 3)) %>% 
+  select((ncol(.)-4):ncol(.)) %>% 
+  left_join(ks, by = "Domain") %>%
+  select(Domain, `*k*`, everything()) %>% 
+  gt() %>% 
+  tab_spanner(md("Equivalence tests (*p*)"), `|*r*| < .1`:`|*r*| < .05`) %>%
+  fmt_labels_md() %>% 
+  tab_source_note(md(paste0("\\", timesaveR:::.make_stars_note(timesaveR:::std_stars[-1])))) %>% 
+  gt_apa_style()
+
+gtsave(main_meta_table, "tables/main_meta_table.docx")
+
+main_meta_table
+```
+
+*RQ1a: Is the link between diversity and team performance insubstantial (i.e., |r| < .1)?* 
+Yes.
+
+*Does this differ between the dimensions of diversity?*
+
+Average effects significantly differed between diversity domains, `r meta_summary_intercept_dom[str_detect(meta_summary_intercept_dom, "^F\\(")]`, though not substantially so, R^2 = `r fmt_pct(R2_equiv_domains$R2)` [`r fmt_pct(R2_equiv_domains$CI_L)`,  `r fmt_pct(R2_equiv_domains$CI_U)`, equivalence test against SESOI of 5%, *p* `r fmt_p(R2_equiv_domains$p_val_equiv)`. They were insubstantial (|r| < .1) for all domains.
+
+After accounting for domain differences, a significant amount of heterogeneity remained, `r meta_summary_intercept_dom[str_detect(meta_summary_intercept_dom, "^QE")]`
+
+`r fmt_pct(as.numeric(I2s$result$I2[3])/100)` of the total variance in effect sizes can be attributed to study-level heterogeneity (I<sup>2</sup><sub>Level 3</sub>), while `r fmt_pct(as.numeric(I2s$result$I2[2])/100)` can be attributed to heterogeneity between the effects studied (I<sup>2</sup><sub>Level 2</sub>).
+
+The 80% credibility intervals were very wide, so that substantial positive and negative associations can be regularly expected. Therefore, moderation analyses were crucial.
+
+## Comparison of sub-domains
+
+```{r message=FALSE}
+dataset <- dataset %>% mutate(domain_and_sub = paste0(domain, "__", sub_dom))
+
+meta_model_sub_dom <- rma.mv(r_adj ~ 0 + domain_and_sub,
+                    V = V,
+                    random = ~ 1 | articlestudy/effect_id,
+                    data = dataset,
+                    test="t",
+                    dfs="contain",
+                    sparse = TRUE)
+
+confidence_intervals  <- read_rds("data/main_meta_res.rds")
+
+confidence_intervals_sub_dom <- conf_int(meta_model_sub_dom, vcov = "CR2", p_values = TRUE) %>% 
+              rowwise() %>%
+  mutate(`equiv_.1` = get_p_value(meta_model_sub_dom, Coef, sesoi = .1),
+         `equiv_.05` = get_p_value(meta_model_sub_dom, Coef, sesoi = .05)) %>% 
+  ungroup() %>% 
+    mutate( cred_upper = beta + 1.282 * sqrt(sum(meta_model_sub_dom$sigma2) + SE^2),
+         cred_lower = beta - 1.282 * sqrt(sum(meta_model_sub_dom$sigma2) + SE^2)) %>% 
+  as_tibble() %>% 
+  separate(Coef, into = c("Domain", "Sub-Domain"), sep = "__") %>% bind_rows(
+    confidence_intervals %>% 
+      mutate(Domain = Coef %>% str_remove("domain") %>% str_remove("domain_and_sub") %>% str_replace("_", "-"), `Sub-Domain` = "Overall") %>% 
+      select(-Coef)
+  )
+
+ks <- dataset %>% 
+  count(Domain = domain) %>% 
+  bind_rows(summarise(., n = sum(n), Domain = "Overall")) %>% 
+  rename(`*k*` = n) %>% 
+  mutate(`Sub-Domain` = "Overall") %>% 
+  bind_rows(dataset %>%
+              count(Domain = domain, `Sub-Domain` = sub_dom) %>% 
+              rename(`*k*` = n))
+
+sub_dom_meta_table_data <- confidence_intervals_sub_dom %>% 
+  mutate(Domain = str_remove(Domain, "domain_and_sub"),
+         `*r*` = paste(fmt_cor(beta, 3), fmt_ci(CI_L, CI_U, 3), sigstars(p_val)),
+         `|*r*| < .1` = fmt_p(`equiv_.1`, equal_sign = FALSE),
+         `|*r*| < .05` = fmt_p(`equiv_.05`,  equal_sign = FALSE),
+         `Credibility\ninterval` = fmt_ci(cred_lower, cred_upper, 3),
+         ) %>% 
+  select(1:2, (ncol(.)-3):ncol(.)) %>% 
+  filter(`Sub-Domain` != "NA") %>%
+  left_join(ks, by = c("Domain", "Sub-Domain")) %>%
+  mutate( `Sub-Domain` = case_when(
+           `Sub-Domain` == "Overall" ~ "",
+           TRUE ~ `Sub-Domain` %>% str_to_title()
+         )) %>% 
+  select(Domain, `Sub-Domain`, `*k*`, everything()) %>% 
+  arrange(Domain != "Overall",  Domain, `Sub-Domain` == "Other", `Sub-Domain`) 
+
+
+sub_dom_meta_table <- sub_dom_meta_table_data %>%
+  gt() %>% 
+  tab_spanner(md("Equivalence tests (*p*)"), `|*r*| < .1`:`|*r*| < .05`) %>%
+  fmt_labels_md() %>% 
+  fmt_number(columns = c(`*k*`), decimals = 0) %>%
+  tab_source_note(md(paste0("\\", timesaveR:::.make_stars_note(timesaveR:::std_stars[-1])))) %>% 
+  gt_apa_style() %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "lightgrey")
+    ),
+    locations = cells_body(
+      columns = everything(), 
+      rows = sub_dom_meta_table_data$`Sub-Domain` == ""
+    )
+  )
+
+gtsave(sub_dom_meta_table, "tables/sub_domain_meta_table.docx")
+
+sub_dom_meta_table
+```
+
+

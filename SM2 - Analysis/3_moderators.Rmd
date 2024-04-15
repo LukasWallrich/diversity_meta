@@ -1,0 +1,1941 @@
+---
+title: "Diversity and team-performance meta-analysis"
+description: null
+output:
+  html_document:
+    theme: united
+    toc: yes
+    code_folding: hide
+  pdf_document:
+    fig_height: 6
+    fig_width: 8
+  word_document: default
+Author: Lukas Wallrich 
+---
+
+# Overview
+
+This file visualises the distribution of effect sizes across the moderators, and then conducts moderation tests using univariate analyses, meta-regression and meta-CART approaches.
+
+```{r setup, message=FALSE, include=FALSE}
+# For reproducibility package versions are locked to a specific date
+if (!require(groundhog)) install.packages('groundhog')
+groundhog::groundhog.library(c("readxl", "metaforest", "metafor", "tidyverse", "clubSandwich", "cli", "rsprite2", "esc", "ggtext",
+                               "mice", "mitools", "metacart", "gt", "gtExtras", "psych", "furrr", "progressr", "micemd", "boot",
+                               "cli"), date = "2023-07-09")
+groundhog::groundhog.library(c("lukaswallrich/timesaveR"), date = "2023-07-09")
+
+# Need more recent version of patchwork due to faceting bug
+groundhog::groundhog.library(c("patchwork"), date = "2023-07-09")
+
+source("helpers/metacart_fix.R") # metacart broke with R 4.2.0 due to a change in if-statement evaluation. This fix changes `class ==` to `inherits()`
+
+source("helpers/helpers.R")
+source("helpers/equivalence_testing.R")
+
+# Prepare to display progress
+handlers(
+  handler_cli()
+)
+
+options(cli.progress_show_after = 0)
+options(cli.progress_clear = FALSE)
+
+dataset <- read_rds("data/full_dataset.rds")
+# Assumed correlation between dependent effect sizes
+rho <- 0.6
+```
+
+## Distribution of effect sizes
+
+```{r fig.height=12}
+
+# Get confidence intervals based on the adjusted standard errors (for effective sample size and unreliability)
+get_cis <- function(r_adj, adjustment_ratio, n, conf.level = 0.95) {
+  
+  # Reduce extreme estimates to those that would be rounded
+  if (r_adj == 1) r_adj <- .995
+  if (r_adj == -1) r_adj <- -.995
+
+    # Fisher's r to z transformation
+  z <- 0.5 * log((1 + r_adj) / (1 - r_adj))
+  
+  alpha <- 1 - conf.level
+  z.critical <- qnorm(1 - alpha / 2)
+  
+  se_adj <- (1 / sqrt(n - 3)) * adjustment_ratio
+  
+  # Confidence interval calculation
+  ci.lower <- z - z.critical * se_adj
+  ci.upper <- z + z.critical * se_adj
+  
+  # Transforming back to r
+  ci.lower.r <- (exp(2 * ci.lower) - 1) / (exp(2 * ci.lower) + 1)
+  ci.upper.r <- (exp(2 * ci.upper) - 1) / (exp(2 * ci.upper) + 1)
+  
+  list(ci_low = ci.lower.r, ci_high = ci.upper.r)
+}
+
+dataset_spec <- dataset %>%
+  mutate(ci = pmap(list(r_adj, ifelse(r_adj == 0, 1, r_adj/r_rep), n_teams), get_cis)) %>%
+  mutate(ci_low = map_dbl(ci, 1), ci_high = map_dbl(ci, 2)) %>% 
+  select(-ci) %>% arrange(r_adj) %>% rowid_to_column(var = "specification") %>% 
+  mutate(color = case_when(
+    ci_high < 0 ~ "darkred",
+    ci_low <= 0 ~ "darkgrey",
+    ci_low > 0 ~ "darkgreen"
+  ))
+
+# Simplified code for creating the specification curve-type plot
+# Derived from https://github.com/masurp/specr
+
+  plot_a <- dataset_spec %>% 
+    ggplot(aes(x = specification, y = r_adj, ymin = ci_low, ymax = ci_high)) +
+    geom_pointrange(aes(color = color), alpha = 0.5, size = 0.6, fatten = 1) +
+    theme_minimal() +
+    scale_color_identity() +
+    theme(axis.line = element_line(size = 0.5), legend.position = "none",
+          panel.spacing = unit(0.75, "lines"), axis.text = element_text(color = "black")) +
+    labs(x = "", y = "r (adjusted)") +
+  geom_hline(yintercept = 0)
+
+  choices <- c("Domain" = "domain", "Top team" = "tmt", "Students" = "stud_sample",
+               "Interdependence" = "interdep", "Complexity" = "complexity", "Longevity" = "longevity",  
+               "Measure" = "meas_type", "Rater" = "rater", "Hypothesis" = "art_focus")
+  
+  rev_choices <- setNames(names(choices), choices)
+
+  
+ levels_replace <- tibble::tribble(
+  ~level_old,                 ~level_new,                 
+   "focal H",                  "Focal hypothesis",        
+   "auxiliary H",              "Auxiliary hypothesis",    
+   "descriptive",              "Descriptive",             
+   "high",                     "High",                    
+   "medium",                   "Medium",                  
+   "low",                      "Low",                     
+   "yes",                      "Yes",                     
+   "no",                       "No",                      
+   "Variety",                  "Variety",                 
+   "Separation",               "Separation",              
+   "Other",                    "Other",                   
+   "Objective",                "Objective",               
+   "Subjective - self",        "Subjective - Self",       
+   "Subjective - supervisor",  "Subjective - Supervisor", 
+   "Subjective - external",    "Subjective - External",   
+   "hours",                    "Hours",                   
+   "days",                     "Days",                    
+   "weeks",                    "Weeks",                   
+   "months",                   "Months",                  
+   "years",                    "Years",                   
+   "stable",                   "Stable",
+   "Demographic",              "Demographic", 
+   "Cognitive",                "Cognitive",   
+   "Job-related",              "Job-Related"
+) %>% {
+  setNames(.$level_new, .$level_old)
+}
+  
+  plot_b <- dataset_spec %>%
+    mutate(sub_dom = fct_lump_n(sub_dom, 5)) %>% 
+    tidyr::gather(key = "key", value = "value", all_of(choices)) %>%
+    mutate(key = coalesce(rev_choices[key], key),
+           value = coalesce(levels_replace[value], value),
+           key = factor(key, levels = rev_choices),
+           value = factor(value, levels = levels_replace) %>% fct_rev()) %>% 
+    filter(!is.na(value)) %>% 
+ggplot(aes(x = specification, y = value, color = color)) +
+    geom_point(shape = 124, size = 3.35, alpha = .5) +
+    scale_color_identity() +
+    theme_minimal() +
+    facet_grid(key ~ ., scales = "free_y", space = "free_y", switch = "y") +
+    theme(axis.line = element_line(size = 0.5), 
+          legend.position = "none",
+          panel.spacing = unit(0.75, "lines"), 
+          axis.text = element_text(color = "black"),
+          strip.text.y.left = element_text(angle = 90),
+          strip.background = element_rect(fill="lightblue", colour="black",linewidth = 1),
+          strip.placement = "outside",
+          strip.text.x = element_blank()) +
+    labs(x = "Effect sizes (ranked)", y = "")
+
+
+  # Combine both plots
+  p <- plot_a / plot_b +
+    plot_layout(heights = c(1, 4))
+
+  ggsave("figures/distribution_of_effects.png", p, width = 23, height = 31, units = "cm")
+  
+  p
+```
+
+# Individually test moderators
+
+For interpretability and comparability with earlier work ... using observed data (so different datasets for each moderator).
+
+```{r univariate-functions}
+
+cat_moderators <- c("complexity", "interdep", "longevity", "meas_type", "rater", "design", "art_focus", "criterion")
+cont_moderators <- c("year_merged", "collectivism", "power_distance")
+expl_mods <- c("country_grp", "tmt", "stud_sample", "ind_sector", "team_function", "domain_and_sub", "objective_rater")
+
+# To rename for reporting
+var_names <-  tibble::tribble(
+  ~old,           ~new,           
+   "art_focus",    "Article focus",   
+   "pub_status",   "Publication status",  
+   "language",      "Language",      
+   "design",       "Design",      
+   "tmt",          "TMT",         
+   "stud_sample",  "Student sample", 
+   "meas_type",    "Diversity measure",   
+   "rater",        "Performance rater",       
+   "objective_rater",        "Objective rater",       
+   "criterion",        "Performance criterion",       
+   "interdep",     "Interdependence",    
+   "complexity",   "Complexity",  
+   "virtuality",   "Virtuality",  
+   "longevity",    "Longevity",
+   "auth_diff",    "Authority Differentiation",   
+   "collectivism",  "Collectivism",   
+   "power_distance",    "Power distance",   
+   "ind_sector",    "Industry sector",   
+   "team_function",    "Team function",   
+   "country_grp",    "Country",   
+   "year_merged",    "Year of data collection",
+   "domain_and_sub", "Sub-domain"
+)
+
+level_names <- tibble::tribble(
+  ~var,           ~level_old,                 ~level_new,                 
+   "art_focus",    "focal H",                  "Focal hypothesis",                 
+   "art_focus",    "auxiliary H",              "Auxiliary hypothesis",             
+   "art_focus",    "descriptive",              "Descriptive",             
+   "pub_status",   "Published",                "Published",               
+   "pub_status",   "Masters Dissertation",          "Masters Dissertation",         
+   "pub_status",   "Working paper/Preprint",   "Working Paper/Preprint",  
+   "pub_status",   "Conference presentation",  "Conference Presentation", 
+   "pub_status",   "PhD Dissertation",         "PhD Dissertation",        
+   "interdep",     "high",                     "High",                    
+   "interdep",     "medium",                   "Medium",                  
+   "interdep",     "low",                      "Low",                     
+   "complexity",   "high",                     "High",                    
+   "complexity",   "medium",                   "Medium",                  
+   "complexity",   "low",                      "Low",                     
+   "tmt",          "yes",                      "Yes",                     
+   "tmt",          "no",                       "No",                      
+   "stud_sample",  "yes",                      "Yes",                     
+   "stud_sample",  "no",                       "No",                      
+   "meas_type",    "Variety",                  "Variety",                 
+   "meas_type",    "Separation",               "Separation",              
+   "meas_type",    "Other",                    "Other",                   
+   "design",       "Experimental",             "Experimental",            
+   "design",       "Observational",            "Observational",           
+   "objective_rater",        "Objective",                "Objective",               
+   "objective_rater",        "Subjective",        "Subjective",       
+  "rater",        "Objective",                "Objective",               
+   "rater",        "Subjective - self",        "Subjective - Self",       
+   "rater",        "Subjective - supervisor",  "Subjective - Supervisor", 
+   "rater",        "Subjective - external",    "Subjective - External",   
+   "virtuality",   "physical",                 "Physical",                
+   "virtuality",   "hybrid-members",           "Hybrid-Members",          
+   "virtuality",   "virtual",                  "Virtual",                 
+   "auth_diff",    "high",                     "High",                    
+   "auth_diff",    "mixed",                    "Mixed",                   
+   "auth_diff",    "low",                      "Low",
+   "language",  "chinese",     "Chinese",    
+   "language",  "dutch",       "Dutch",      
+   "language",  "english",     "English",    
+   "language",  "french",      "French",     
+   "language",  "german",      "German",     
+   "language",  "indonesian",  "Indonesian", 
+   "language",  "italian",     "Italian",    
+   "language",  "japanese",    "Japanese",   
+   "language",  "korean",      "Korean",     
+   "language",  "portuguese",  "Portuguese", 
+   "language",  "spanish",     "Spanish",
+   "longevity",  "hours",    "Hours",   
+   "longevity",  "days",     "Days",    
+   "longevity",  "weeks",    "Weeks",   
+   "longevity",  "months",   "Months",  
+   "longevity",  "years",    "Years",
+   "longevity",  "stable",   "Stable"  
+)
+
+single_cat_moderator_test <- function(moderator, data, min_group_k = FALSE) {
+
+  p <- progressor(7, message = paste("Now estimating", moderator))
+
+  if (min_group_k) {
+    data$`__mod__` <- data[[moderator]] # So that colname is known for use in dplyr pipe
+
+    outs <- data %>%
+      count(`__mod__`) %>%
+      filter(n < min_group_k) %>%
+      pull(`__mod__`)
+    data$`__mod_dom__` <- paste0(data$`__mod__`, data$domain)
+    domain_outs <- data %>%
+      count(`__mod_dom__`) %>%
+      filter(n < min_group_k) %>%
+      pull(`__mod_dom__`)
+
+    V <- with(
+      data %>% filter(!data[[moderator]] %in% outs),
+      impute_covariance_matrix(
+        vi = var_adj,
+        cluster = articlestudy,
+        r = rho
+      )
+    )
+    if (nrow(V) != nrow(data)) message("Excluded ", nrow(data) - nrow(V), " effect sizes with moderator levels below minimum group size")
+
+    Vd <- with(
+      data %>% filter(!data$`__mod_dom__` %in% domain_outs),
+      impute_covariance_matrix(
+        vi = var_adj,
+        cluster = articlestudy,
+        r = rho
+      )
+    )
+    if (nrow(Vd) != nrow(data)) message("Excluded ", nrow(data) - nrow(Vd), " effect sizes with moderator-domain combinations below minimum group size")
+
+    data <- data %>% filter(!data[[moderator]] %in% outs)
+  } else {
+    V <- with(
+      data,
+      impute_covariance_matrix(
+        vi = var_adj,
+        cluster = articlestudy,
+        r = rho
+      )
+    )
+
+    Vd <- V # Same matrix when there is no filtering
+  }
+
+  p()
+
+  no_levels <- data[[moderator]] %>%
+    unique() %>%
+    na.omit() %>%
+    length()
+
+  mod <- {
+    data[[moderator]] <- factor(data[[moderator]], ordered = FALSE)
+
+
+    mod <- rma.mv(as.formula(paste0("r_adj ~ 0 + ", moderator)),
+      V = V,
+      random = ~ 1 | articlestudy / effect_id,
+      test = "t",
+      dfs = "contain",
+      data = data,
+      sparse = TRUE
+    )
+    p()
+
+    if (min_group_k) data <- data %>% filter(!data$`__mod_dom__` %in% domain_outs)
+
+
+    mod_domain_no_int <- rma.mv(as.formula(paste0("r_adj ~ 0 + domain:", moderator)),
+      V = Vd,
+      random = ~ 1 | articlestudy / effect_id,
+      test = "t",
+      dfs = "contain",
+      data = data,
+      sparse = TRUE
+    )
+    p()
+    list(
+      mod = mod,
+      mod_domains_no_int = mod_domain_no_int
+    )
+  }
+  robust_across <- coef_test(mod$mod, vcov = "CR2")
+  robust_domain_no_int <- coef_test(mod$mod_domains_no_int, vcov = "CR2")
+
+  if (nrow(robust_across) > 20) message("Moderator has large number of levels - wald_test may take several minutes.")
+
+  # Test of moderator overall
+  res_tibble <- Wald_test(mod$mod, vcov = "CR2", constrain_equal(1:nrow(robust_across), coef(mod$mod))) %>% mutate(domain = "Overall")
+  p()
+
+  # Test of domains
+  if (no_levels * 3 == nrow(robust_domain_no_int)) {
+    for (i in 1:3) {
+      res_tibble <- bind_rows(res_tibble, Wald_test(mod$mod_domains_no_int, vcov = "CR2", constrain_equal(seq(i, no_levels * 3, by = 3), coef(mod$mod_domains_no_int))) %>%
+        mutate(domain = names(coef(mod$mod_domains_no_int))[i] %>% str_extract("[A-z]*")))
+      p()
+    }
+  } else {
+    # Some levels did not exist in all domains - in these cases, need to match by coefficient names
+    for (d in unique(data$domain)) {
+      res_tibble <- bind_rows(res_tibble, Wald_test(mod$mod_domains_no_int,
+        vcov = "CR2",
+        constrain_equal(which(str_detect(names(coef(mod$mod_domains_no_int)), d)), coef(mod$mod_domains_no_int))
+      ) %>%
+        mutate(domain = d))
+      p()
+    }
+  }
+  list(moderator_test = res_tibble, robu_averages = robust_across, robu_domain_no_int = robust_domain_no_int, meta_models = mod)
+}
+
+single_cont_moderator_test <- function(moderator, data) {
+
+  p <- progressor(4, message = paste("Now estimating", moderator))
+
+  V <- with(
+    data,
+    impute_covariance_matrix(
+      vi = var_adj,
+      cluster = articlestudy,
+      r = rho
+    )
+  )
+  p()
+  mod <- {
+    mod <- rma.mv(as.formula(paste0("r_adj ~ ", moderator)),
+      V = V,
+      random = ~ 1 | articlestudy / effect_id,
+      test = "t",
+      dfs = "contain",
+      data = data,
+      sparse = TRUE
+    )
+    p()
+    mod_domains <- rma.mv(as.formula(paste0("r_adj ~ 0 + domain + domain:", moderator)),
+      V = V,
+      random = ~ 1 | articlestudy / effect_id,
+      test = "t",
+      dfs = "contain",
+      data = data,
+      sparse = TRUE
+    )
+    p()
+    mod_domains_no_int <- rma.mv(as.formula(paste0("r_adj ~ 0 + domain:", moderator)),
+      V = V,
+      random = ~ 1 | articlestudy / effect_id,
+      test = "t",
+      dfs = "contain",
+      data = data,
+      sparse = TRUE
+    )
+    p()
+    list(
+      mod = mod,
+      mod_domains = mod_domains,
+      mod_domains_no_int = mod_domains_no_int
+    )
+  }
+
+  list(
+    robust_across = coef_test(mod$mod, vcov = "CR2"),
+    robust_domain = coef_test(mod$mod_domains, vcov = "CR2"),
+    robust_domain_no_int = coef_test(mod$mod_domains_no_int, vcov = "CR2"),
+    meta_models = mod
+  )
+}
+
+cat_plots <- function(cats, minimum_articles = NULL, data = dataset) {
+  minart <- minimum_articles # Workaround a promise evaluation error
+  imap(cats, \(res, predictor_name, minimum_articles = minart) {
+    all_coefs <- bind_rows(
+      res$robu_domain_no_int %>% tibble(),
+      res$robu_averages %>% tibble()
+    )
+
+    if (!is.null(minimum_articles)) {
+      dataset_articles <- data %>%
+        group_by(articlestudy, !!sym(predictor_name)) %>%
+        slice_head(n = 1) %>%
+        ungroup()
+
+
+      all_vals <- dataset_articles[[predictor_name]] %>%
+        unique() %>%
+        na.omit()
+
+      out_overall <- setdiff(
+        all_vals,
+        dataset_articles[[predictor_name]] %>% table() %>% as_tibble() %>% filter(n >= minimum_articles) %>% pull(1)
+      ) %>% paste0(predictor_name, .)
+
+      dataset_articles <- data %>%
+        group_by(articlestudy, domain, !!sym(predictor_name)) %>%
+        slice_head(n = 1) %>%
+        ungroup()
+
+      out_dem <- setdiff(
+        all_vals,
+        dataset_articles %>% filter(domain == "Demographic") %>% .[[predictor_name]] %>% table() %>%
+          as_tibble() %>% filter(n >= minimum_articles) %>% pull(1)
+      ) %>% paste0("domainDemographic:", predictor_name, .)
+
+      out_job <- setdiff(
+        all_vals,
+        dataset_articles %>% filter(domain == "Job-related") %>% .[[predictor_name]] %>% table() %>%
+          as_tibble() %>% filter(n >= minimum_articles) %>% pull(1)
+      ) %>% paste0("domainJob-related:", predictor_name, .)
+
+      out_cog <- setdiff(
+        all_vals,
+        dataset_articles %>% filter(domain == "Cognitive") %>% .[[predictor_name]] %>% table() %>%
+          as_tibble() %>% filter(n >= minimum_articles) %>% pull(1)
+      ) %>% paste0("domainCognitive:", predictor_name, .)
+
+      all_out <- c(out_overall, out_dem, out_job, out_cog)
+
+      all_coefs <- all_coefs %>% filter(!Coef %in% all_out)
+    }
+
+    cur_levels <- level_names %>% filter(var == predictor_name)
+
+    df_preprocessed <- all_coefs %>%
+      mutate(
+        domain = coalesce(str_extract(Coef, "domain[^:]+") %>% str_remove("domain"), "**Overall**"),
+        Coef = str_remove(Coef, paste0(".*", predictor_name))
+      ) %>%
+      select(coef = Coef, beta = beta, se = SE, df = df_Satt, p = p_Satt, domain)
+
+    if (nrow(cur_levels) > 0) {
+      df_preprocessed <- df_preprocessed %>%
+        rowwise() %>%
+        mutate(coef = cur_levels$level_new[cur_levels$level_old == coef] %>% factor(levels = rev(cur_levels$level_new))) %>%
+        ungroup()
+    }
+
+    p <- ggplot(df_preprocessed, aes(y = coef, x = beta, color = domain)) +
+      geom_point() +
+      geom_errorbarh(aes(xmin = beta - 1.96 * se, xmax = beta + 1.96 * se), height = 0.2) +
+      geom_vline(xintercept = 0, linetype = "dashed", linewidth = .5) +
+      geom_vline(xintercept = c(-.1, .1), linetype = "dotted", linewidth = .5) +
+      facet_wrap(~domain, scales = "free_y", ncol = 1) +
+      theme_minimal() +
+      labs(
+        x = "", y = "",
+        subtitle = var_names$new[var_names$old == predictor_name]
+      ) +
+      theme(
+        axis.text.y = element_text(angle = 0, hjust = 1),
+        strip.text = element_markdown()
+      ) +
+      scale_color_brewer(palette = "Set1") +
+      scale_fill_brewer(palette = "Set1") +
+      theme(legend.position = "none")
+    list(plot = p, coefs = df_preprocessed)
+  })
+}
+
+# Bootstrap (pseudo) R2 confidence intervals based on guidance by Wolfgang Viechtbauer
+# https://www.metafor-project.org/doku.php/tips:ci_for_r2
+# https://gist.github.com/wviechtb/6fbfca40483cb9744384ab4572639169
+# Showed that for this, BCa CIs are best
+
+boot_R2 <- function(dat, indices, moderator, other_moderators = NULL, progress = TRUE) {
+  if (progress) p()
+
+  data <- dat[indices, ]
+
+  # Drop rows where moderator or any of other_moderators are NA
+  if (!is.null(other_moderators)) {
+    data <- data %>% drop_na(all_of(c(moderator, other_moderators)))
+  } else {
+    data <- data %>% drop_na(all_of(moderator))
+  }
+
+  # Null models for R2
+  V <- with(
+    data,
+    impute_covariance_matrix(
+      vi = var_adj,
+      cluster = articlestudy,
+      r = rho
+    )
+  )
+
+  if (!is.null(other_moderators)) {
+    fml <- paste("r_adj ~", paste(other_moderators, collapse = " + "))
+  } else {
+    fml <- "r_adj ~ 1"
+  }
+
+
+  mod_null <- try(suppressWarnings(rma.mv(as.formula(fml),
+    V = V,
+    random = ~ 1 | articlestudy / effect_id,
+    test = "t",
+    dfs = "contain",
+    data = data,
+    sparse = TRUE
+  )))
+
+  mod_moderated <- try(suppressWarnings(rma.mv(as.formula(paste(fml, moderator, sep = " + ")),
+    V = V,
+    random = ~ 1 | articlestudy / effect_id,
+    test = "t",
+    dfs = "contain",
+    data = data,
+    sparse = TRUE
+  )))
+
+  if (inherits(mod_null, "try-error") || inherits(mod_moderated, "try-error")) {
+    NA
+  } else {
+    if (sum(mod_null$sigma2) > 0) {
+      max(0, 100 * (sum(mod_null$sigma2) - sum(mod_moderated$sigma2)) / sum(mod_null$sigma2))
+    } else {
+      # catch cases where sum(res0$sigma2) is 0, to avoid -Inf (if sum(res1$sigma2)
+      # is positive) or NaN (if sum(res1$sigma2) is also 0) for R^2; for such cases,
+      # define R^2 to be 0
+      0
+    }
+  }
+}
+```
+
+
+```{r}
+dataset$objective_rater <- fct_collapse(dataset$rater, "Objective" = "Objective", 
+                                        "Subjective" = c("Subjective - self", "Subjective - supervisor", "Subjective - external"))
+
+if (file.exists("data/single_cat_moderator_tests.qs")) {
+  single_cat_moderator_tests <- qs::qread("data/single_cat_moderator_tests.qs")
+  if (any(names(single_cat_moderator_tests) != cat_moderators)) {
+    warning("File on disk does not match current list of moderators. Consider deleting it to re-estimate.")
+  }
+} else {
+  single_cat_moderator_tests <- with_progress({
+    cat_moderators %>%
+      set_names() %>%
+      map(\(moderator) single_cat_moderator_test(moderator, dataset))
+  })
+  qs::qsave(single_cat_moderator_tests, "data/single_cat_moderator_tests.qs")
+}
+
+if (file.exists("data/single_cont_moderator_tests.rds")) {
+  single_cont_moderator_tests <- read_rds("data/single_cont_moderator_tests.rds")
+  if (any(names(single_cont_moderator_tests) != cont_moderators)) {
+    warning("File on disk does not match current list of moderators. Consider deleting it to re-estimate.")
+  }
+} else {
+  single_cont_moderator_tests <- with_progress({
+    cont_moderators %>%
+      set_names() %>%
+      map(\(moderator) single_cont_moderator_test(moderator, dataset))
+  })
+  write_rds(single_cont_moderator_tests, "data/single_cont_moderator_tests.rds")
+}
+
+# Collapse countries so that there are at least 3 per group (otherwise, group estimates too noisy
+# and Wald test fails to converge with more than 30 levels)
+dataset <- dataset %>% mutate(
+  country_grp = fct_lump_min(country, 3),
+  domain_and_sub = paste(domain, sub_dom)
+)
+
+if (file.exists("data/single_expl_cat_moderator_tests.qs")) {
+  single_expl_cat_moderator_tests <- qs::qread("data/single_expl_cat_moderator_tests.qs")
+  if (any(names(single_expl_cat_moderator_tests) != expl_mods)) {
+    warning("File on disk does not match current list of moderators. Consider deleting it to re-estimate.")
+  }
+} else {
+  single_expl_cat_moderator_tests <- with_progress({
+    expl_mods %>%
+      set_names() %>%
+      map(\(moderator) single_cat_moderator_test(moderator, dataset, min_group_k = 3))
+  })
+  qs::qsave(single_expl_cat_moderator_tests, "data/single_expl_cat_moderator_tests.qs")
+}
+
+cat_summary <- single_cat_moderator_tests %>%
+  map_dfr("moderator_test", .id = "moderator") %>%
+  mutate(
+    domain = str_remove(domain, "domain"),
+    domain = case_when(
+      domain == "Job" ~ "Job-related",
+      TRUE ~ domain
+    )
+  )
+
+cont_summary <- bind_rows(
+  single_cont_moderator_tests %>% map_dfr("robust_across", .id = "moderator") %>% as_tibble() %>% mutate(domain = "Overall") %>% filter(Coef != "intrcpt"),
+  single_cont_moderator_tests %>% map_dfr("robust_domain", .id = "moderator") %>% as_tibble() %>% filter(str_detect(Coef, ":")) %>%
+    mutate(domain = str_extract(Coef, ".*:") %>% str_remove("domain") %>% str_remove(":"))
+)
+
+cat_exp_summary <- single_expl_cat_moderator_tests %>%
+  map_dfr("moderator_test", .id = "moderator") %>%
+  mutate(
+    domain = str_remove(domain, "domain"),
+    domain = case_when(
+      domain == "Job" ~ "Job-related",
+      TRUE ~ domain
+    )
+  )
+
+ks <- single_cat_moderator_tests %>%
+  map_dbl(~ .x$meta_models$mod_domains$k) %>%
+  tibble(moderator = names(single_cat_moderator_tests), k = .) %>%
+  bind_rows(single_cont_moderator_tests %>% map_dbl(~ .x$meta_models$mod_domains$k) %>% tibble(moderator = names(single_cont_moderator_tests), k = .)) %>%
+  bind_rows(single_expl_cat_moderator_tests %>% map_dbl(~ .x$meta_models$mod_domains$k) %>% tibble(moderator = names(single_expl_cat_moderator_tests), k = .)) %>%
+  rowwise() %>%
+  mutate(moderator = var_names$new[var_names$old == moderator]) %>%
+  ungroup()
+
+```
+
+The code to bootstrap R2s for the moderators (for equivalence testing) is very slow - it takes about 7-8 hours per moderator on an M2 Macbook Air. Therefore, it was run on AWC EC2 instances. The code used is found in `helpers/aws_code R2.R` but based on the code provided for reference below.
+
+```{r}
+# Run as background job
+reg_mods <- c(cat_moderators, cont_moderators)
+
+if (file.exists("data/bs_R2s_reg_mods.rds")) {
+  bs_R2_reg_mods <- read_rds("data/bs_R2s_reg_mods.rds")
+} else {
+job::job("Bootstrapping R2 reg mods" = {
+library(boot)
+R <- 5000 # Needed for bca confidence intervals (see https://bugs.r-project.org/show_bug.cgi?id=18647), though that takes 7-8h per moderator (M2 Macbook)
+system.time({
+  bs_R2s <- reg_mods %>% set_names() %>% map(\(moderator) {
+    set.seed(1234)
+    if (!file.exists(glue::glue("data/bs_R2s_{moderator}.rds"))) {
+      message("Now bootstrapping ", moderator)
+      bs <- boot(dataset, boot_R2, R=R, moderator = moderator, ncpus = 6, parallel = "multicore")
+      write_rds(bs, glue::glue("data/bs_R2s_{moderator}.rds"))
+      bs
+    } else {
+      read_rds(glue::glue("data/bs_R2s_{moderator}.rds"))
+    }
+
+  })
+})
+write_rds(bs_R2s, "data/bs_R2s_reg_mods.rds")
+}, import = c(rho, dataset, boot_R2, reg_mods))
+   message("Registered R2s will be bootstrapped now in background job - rerun this chunk afterwards to load them. Note that this is very slow.")
+}
+
+if (file.exists("data/bs_R2s_expl_mods.rds")) {
+  bs_R2_expl_mods <- read_rds("data/bs_R2s_expl_mods.rds")
+} else {
+job::job("Bootstrapping R2 reg mods" = {
+library(boot)
+R <- 5000 # Needed for bca confidence intervals (see https://bugs.r-project.org/show_bug.cgi?id=18647), though that takes 7-8h per moderator (M2 Macbook)
+system.time({
+  bs_R2s <- expl_mods %>% set_names() %>% map(\(moderator) {
+    set.seed(1234)
+    if (!file.exists(glue::glue("data/bs_R2s_{moderator}.rds"))) {
+      message("Now bootstrapping ", moderator)
+      bs <- boot(dataset, boot_R2, R=R, moderator = moderator, progress = FALSE, ncpus = 5, parallel = "multicore")
+      write_rds(bs, glue::glue("data/bs_R2s_{moderator}.rds"))
+      bs
+    } else {
+      read_rds(glue::glue("data/bs_R2s_{moderator}.rds"))
+    }
+
+  })
+})
+write_rds(bs_R2s, "data/bs_R2s_expl_mods.rds")
+}, import = c(rho, dataset, boot_R2, expl_mods))
+   message("Exploratory R2s will be bootstrapped now in background job - rerun this chunk afterwards to load them. Note that this is very slow.")
+}
+
+
+
+```
+
+```{r}
+library(boot)
+
+if (!file.exists("data/mod_R2_equivalence.qs")) {
+  job::job("Equivalence testing for moderator R2s" = {
+    mod_R2s <- imap_dfr(bs_R2_reg_mods, .id = "moderator", \(R2s, moderator) {
+  # Repeated calculation of bca confidence intervals takes ca. 10 mins per moderator
+  cli::cli_alert_info("Now processing {moderator}")
+  bs_type <- "bca"
+  R2 <- R2s$t0
+  ci <- try(extract_boot_ci(boot.ci(R2s, .95, type = "bca")), silent = TRUE)
+  if (inherits(ci, "try-error")) {
+    bs_type <- "perc"
+  cli::cli_alert_warning("Could not estimate bca confidence interval for {moderator} - falling back to percentile.")
+    ci <- boot.ci(R2s, .95, type = "perc") %>% extract_boot_ci()
+  } 
+  p_equiv <- boot_get_equiv_p(R2s, 5, ci_type = bs_type)
+  
+  tibble(R2 = R2, R2_ci = glue::glue("[{round_(ci$CI_L, 2)}%, {round_(ci$CI_U, 2)}%]"), p_equiv = p_equiv, ci_list = list(ci))  
+})
+      qs::qsave(mod_R2s, "data/mod_R2_equivalence.qs")
+  })
+  message("Equivalence testing for registered moderator R2s will be run now in background job - rerun this chunk afterwards to load them. This should take about 90 minutes.")
+} else {
+  mod_R2s <- qs::qread("data/mod_R2_equivalence.qs")  
+}
+
+R2s <- read_rds("data/bs_R2s_objective_rater.rds")
+
+if (!file.exists("data/mod_R2_equivalence_expl.qs")) {
+  job::job("Equivalence testing for exploratory moderator R2s" = {
+    mod_R2s <- imap_dfr(bs_R2_expl_mods, .id = "moderator", \(R2s, moderator) {
+  # Repeated calculation of bca confidence intervals takes ca. 10 mins per moderator
+  cli::cli_alert_info("Now processing {moderator}")
+  bs_type <- "bca"
+  R2 <- R2s$t0
+  ci <- try(extract_boot_ci(boot.ci(R2s, .95, type = "bca")), silent = TRUE)
+  if (inherits(ci, "try-error")) {
+    bs_type <- "perc"
+  cli::cli_alert_warning("Could not estimate bca confidence interval for {moderator} - falling back to percentile.")
+    ci <- boot.ci(R2s, .95, type = "perc") %>% extract_boot_ci()
+  } 
+  p_equiv <- boot_get_equiv_p(R2s, 5, ci_type = bs_type)
+  
+  tibble(R2 = R2, R2_ci = glue::glue("[{round_(ci$CI_L, 2)}%, {round_(ci$CI_U, 2)}%]"), p_equiv = p_equiv, ci_list = list(ci))  
+})
+      qs::qsave(mod_R2s, "data/mod_R2_equivalence_expl.qs")
+  })
+  message("Equivalence testing for exploratory moderator R2s will be run now in background job - rerun this chunk afterwards to load them. This should take about 90 minutes.")
+} else {
+  mod_R2s_expl <- qs::qread("data/mod_R2_equivalence_expl.qs")  
+}
+
+```
+
+```{r}
+mod_R2s <-  bind_rows(mod_R2s, mod_R2s_expl)
+
+mod_table <- bind_rows(cat_summary %>% select(moderator, p_val, domain),
+          cont_summary %>% select(moderator, p_val = p_Satt, domain),
+          cat_exp_summary %>% select(moderator, p_val, domain)) %>% 
+    left_join(mod_R2s, by = "moderator") %>% 
+  filter(moderator != "domain_and_sub") %>% 
+  rowwise() %>% 
+  mutate(p_fmt = paste(sigstars(p_val)) %>% str_replace_all("&dagger;", "†"), #.docx fails with this HTML code in body
+         moderator = var_names$new[var_names$old == moderator]) %>%
+    select(-p_val) %>% 
+  pivot_wider(names_from = "domain", values_from = "p_fmt") %>% 
+  left_join(ks, by = "moderator") %>% 
+  transmute(Moderator = moderator, k, Overall, Demographic, Cognitive, `Job-related`, 
+            `R<sup>2</sup>` = glue::glue("{round_(R2, 2)}% {R2_ci}"), `R<sup>2</sup> < 5%` = fmt_p(p_equiv, equal_sign = FALSE)) %>% 
+  gt::gt() %>% 
+  tab_header(title = "Univariate moderator tests") %>% 
+  tab_spanner(md("Significance tests"), Overall:`Job-related`) %>% 
+  tab_spanner(md("Overall effect size"),  id = "overall-spanner", `R<sup>2</sup>`:`R<sup>2</sup> < 5%`) %>% 
+   cols_label(.fn = md) %>% 
+  gt::tab_source_note(timesaveR:::std_stars %>% {glue::glue_collapse(paste(names(.),.), ", ")} %>% html()) %>% 
+  gt_apa_style()
+
+gtsave(mod_table, "tables/moderator_tests.docx")
+
+mod_table
+
+```
+
+```{r fig.height=13, fig.width=9}
+
+sig_mods <- c(single_cat_moderator_tests[c(1, 3, 7, 5)], single_expl_cat_moderator_tests[7], single_expl_cat_moderator_tests[2])
+many_cats <- single_expl_cat_moderator_tests[c(1, 5)]
+
+main_plots <- cat_plots(sig_mods)
+tall_plots <- cat_plots(many_cats, minimum_articles = 5)
+  
+p <- wrap_plots(map(main_plots, "plot"), tag_level = "new") +
+  plot_annotation(tag_levels = 'A', title = "Estimated correlations depending on moderator levels",
+                  subtitle = "Estimated from univariate meta-regressions with cluster-robust standard errors",
+                  caption = "95% confidence intervals shown with error bars. Dotted lines indicate thresholds for small effects (|r| < .1).")
+
+p2 <- wrap_plots(map(tall_plots, "plot"), tag_level = "new") +
+  plot_annotation(tag_levels = list(c('G', 'H')), title = "Estimated correlations depending on moderator levels",
+                  subtitle = "Estimated from univariate meta-regressions with cluster-robust standard errors",
+                  caption = "95% confidence intervals shown with error bars. Dotted lines indicate thresholds for small effects (|r| < .1).\nLevels (and domain-level combinations) based on fewer than 5 samples are not shown.")
+
+coefs <- bind_rows(main_plots %>% map_dfr("coefs", .id = "moderator"),
+                   tall_plots %>% map_dfr("coefs", .id = "moderator")) %>% select(moderator, domain, everything()) %>% 
+  rowwise() %>% mutate(moderator = var_names$new[var_names$old == moderator]) %>% ungroup()
+
+ggsave("figures/moderated_estimates_cat.png", p, width = 9, height = 13)
+ggsave("figures/moderated_estimates_tall.png", p2, width = 9, height = 11)
+
+p
+p2
+
+coefs %>% arrange(moderator, domain) %>% group_by(moderator, domain) %>%  gt() %>% 
+  fmt_number(columns = c(beta, se, df), decimals = 2) %>% fmt(p, fns = \(x) fmt_p(x, equal_sign = FALSE)) %>% 
+  cols_label(coef = "", beta = "*r*", p = "*p*", se = "SE", .fn = md) %>%
+  gt_apa_style() %>% 
+  cols_align("right", coef) %>% 
+  tab_style(
+    style = list(cell_text(weight = "bold")),
+    locations = cells_row_groups()
+  )
+```
+
+```{r fig.height=13, fig.width=9}
+
+predict_robust <- function(mod, moderator, include_domains = FALSE) {
+  # From Viechtbauer - https://stat.ethz.ch/pipermail/r-sig-meta-analysis/2021-October/003516.html
+
+  rob <- robust(mod, cluster = dataset$articlestudy)
+
+  tmp1 <- coef_test(mod, vcov = "CR2")
+  tmp2 <- conf_int(mod, vcov = "CR2")
+  tmp3 <- Wald_test(mod, constraints = constrain_zero(mod$btt), vcov = "CR2")
+
+  # force those results into 'sav'
+  rob$b <- rob$beta <- tmp1$beta
+  rob$se <- tmp1$SE
+  rob$zval <- tmp1$tstat
+  rob$ddf <- tmp1$df
+  rob$pval <- tmp1$p_Satt
+  rob$ci.lb <- tmp2$CI_L
+  rob$ci.ub <- tmp2$CI_U
+  rob$vb <- vcovCR(mod, type = "CR2")
+  rob$QM <- tmp3$Fstat
+  rob$QMdf <- c(tmp3$df_num, round(tmp3$df_denom, 2))
+  rob$QMp <- tmp3$p_val
+
+  if (include_domains) {
+    mod_vals <- map(seq(min(dataset[[moderator]], na.rm = TRUE), max(dataset[[moderator]], na.rm = TRUE)), ~ {
+      matrix(c(1, 0, 0, 0, 1, 0, 0, 0, 1), nrow = 3, byrow = TRUE) %>%
+        cbind(., . * .x)
+    }) %>% do.call(rbind, .)
+
+    out <- predict(rob, newmods = mod_vals) %>% as_tibble()
+
+    colnames(mod_vals) <- names(coef(mod))
+    out <- cbind(out, mod_vals %>% as_tibble())
+  } else {
+    out <- predict(rob, newmods = seq(min(dataset[[moderator]], na.rm = TRUE), max(dataset[[moderator]], na.rm = TRUE))) %>% as_tibble()
+    out[[moderator]] <- seq(min(dataset[[moderator]], na.rm = TRUE), max(dataset[[moderator]], na.rm = TRUE))
+  }
+  out
+}
+
+create_cont_chart <- function(moderator) {
+  preds <- predict_robust(single_cont_moderator_tests[[moderator]]$meta_models$mod, moderator)
+  preds_dom <- predict_robust(single_cont_moderator_tests[[moderator]]$meta_models$mod_domains, moderator, TRUE)
+
+  # Combine predictions for domains and overall
+  all_coefs <- preds_dom %>%
+    mutate(domain = case_when(
+      domainDemographic == 1 ~ "Demographic",
+      domainCognitive == 1 ~ "Cognitive",
+      `domainJob-related` == 1 ~ "Job-related"
+    )) %>%
+    mutate(!!moderator := case_when(
+      domainDemographic == 1 ~ !!sym(paste0("domainDemographic:", moderator)),
+      domainCognitive == 1 ~ !!sym(paste0("domainCognitive:", moderator)),
+      `domainJob-related` == 1 ~ !!sym(paste0("domainJob-related:", moderator))
+    )) %>%
+    select(-starts_with("domain.+")) %>%
+    bind_rows(preds %>% mutate(domain = "Overall"), .)
+
+  mod_range <- dataset %>%
+    group_by(domain) %>%
+    summarise(
+      min_mod = min(!!sym(moderator), na.rm = TRUE),
+      max_mod = max(!!sym(moderator), na.rm = TRUE)
+    ) %>%
+    bind_rows(
+      dataset %>% summarise(domain = "Overall", min_mod = min(!!sym(moderator), na.rm = TRUE), max_mod = max(!!sym(moderator), na.rm = TRUE))
+    )
+
+  filtered_coefs <- all_coefs %>%
+    left_join(mod_range, by = "domain") %>%
+    filter(!!sym(moderator) >= min_mod & !!sym(moderator) <= max_mod) %>%
+    select(-min_mod, -max_mod) %>%
+    mutate(domain = factor(domain, levels = c("Overall", "Cognitive", "Demographic", "Job-related")))
+
+  # Generate the plot
+  ggplot(filtered_coefs, aes(x = !!sym(moderator), y = pred)) +
+    geom_line(aes(color = domain)) +
+    geom_ribbon(aes(ymin = pred - 1.96 * se, ymax = pred + 1.96 * se, fill = domain), alpha = 0.2) +
+    geom_hline(yintercept = c(-0.1, .1), linetype = "dotted", linewidth = .5) +
+    geom_hline(yintercept = 0, linetype = "dashed", linewidth = .5) +
+    labs(x = "", subtitle = var_names$new[var_names$old == moderator], y = "*r*") +
+    theme_minimal() +
+    theme(
+      axis.title.y = element_markdown(),
+      legend.position = "none"
+    ) +
+    scale_color_brewer(palette = "Set1") +
+    scale_fill_brewer(palette = "Set1") +
+    facet_wrap(~domain)
+}
+
+ps <- list(create_cont_chart("year_merged"),
+     create_cont_chart("collectivism"),
+     create_cont_chart("power_distance")) 
+
+layout <- ("
+AAAAAAAAEDDDD
+BBBBBBBBEDDDD
+CCCCCCCCEDDDD
+")
+
+p <- ps[[1]] + ps[[2]] + ps[[3]] + 
+  (tall_plots[[2]]$plot + labs(caption = "Only functions investigated in at least 5 samples are shown.")) + 
+  plot_spacer() + plot_layout(design = layout) + 
+  plot_annotation(tag_levels = list(c('G', 'H', "I", "J")), title = "Estimated correlations depending on moderator value",
+                  subtitle = "Estimated from univariate meta-regressions with cluster-robust standard errors",
+                  caption = "NB: Lengths of the regression line corresponds to observed range of the data.")
+     
+ggsave("figures/moderated_estimates_cont.png", p, width = 9, height = 12)
+
+p
+
+```
+
+# Meta-regression
+
+## Impute data
+
+- Exclude variables with no variance (only positive) and > 95% missing (psych safety and diversity climate)
+- How to deal with M*N*AR variables (virtuality and authority diff)? Would require many post-hoc choices - so in spirit of RR, omitted.
+- Criterion only coded in few cases, and many were mixed / not applicable - so cannot be meaningfully imputed. Omitted.
+
+```{r}
+if (file.exists("data/imputed_data.rds")) {
+  imp <- read_rds("data/imputed_data.rds")
+} else {
+job::job("impute_data" = {
+    mi_vars <- c("art_focus", "pub_status", "design", "setting", "ind_sector", "team_function", "country", "n_teams", "stud_sample", "tmt", "domain", "sub_dom", "meas_type", "rater", "interdep", "complexity", "longevity", "power_distance", "collectivism", "year_merged", "citation_count", "criterion") 
+
+    convert_to_factor <- function(x) {
+      if (is.character(x)) {
+        return(as.factor(x))
+      } else {
+        return(x)
+      }
+    }
+
+    dataset <- dataset %>%
+      mutate(across(any_of(mi_vars), convert_to_factor))
+
+    # Specify ordered factors
+    dataset$longevity <- factor(dataset$longevity, levels = c("hours", "days", "weeks", "months", "years", "stable"), ordered = TRUE)
+    dataset$interdep <- factor(dataset$interdep, levels = c("low", "medium", "high"), ordered = TRUE)
+    dataset$complexity <- factor(dataset$complexity, levels = c("low", "medium", "high"), ordered = TRUE)
+
+    # Get matrices
+    imp <- mice(dataset, maxit = 0, seed = 1526)
+
+    # Set variables of interest to be predicted by each other, all others ignored
+    preds <- imp$predictorMatrix
+    preds[] <- 0
+    preds[mi_vars, mi_vars] <- 1
+
+    # Use other model variables as predictors (as per mice vignette guidance)
+    preds[mi_vars, "r_adj"] <- 1
+    preds[mi_vars, "se"] <- 1
+
+    # Standard methods per variable type are generally good (polyreg for factors, polr for ordered, pmm for continuous)
+    # but polyreg does not work well with factors with many levels - so these set to pmm
+    methods <- imp$method
+    methods[c("ind_sector", "team_function", "country", "sub_dom")] <- "pmm"
+    methods[!names(methods) %in% mi_vars] <- ""
+
+    m <- 100 # Based on Van Buren, to attain maximum power: https://stefvanbuuren.name/fimd/sec-howmany.html 
+
+    domains <- dataset$domain
+    # Ensure that sub-domains are only imputed within each domain (otherwise get invalid imputations)
+    # Are missing very rarely (usually only for education level vs degree)
+    mice.impute.imp_sub_domain <- function(y, ry, x, ...) {
+      # y is the vector to be imputed
+      # ry is a logical vector indicating which values in y are missing
+      # x is the matrix of predictor variables, already filtered by predMatrix
+      dots <- list(...)
+
+      # Domain information cannot be extracted from x as it is dummy-coded there, so take from global env
+      unique_domains <- unique(domains)
+
+      imputed <- rep(NA, sum(dots$wy)) # Start with y and replace missing values
+
+      imps <- list()
+
+      for (d in unique_domains) {
+        # Subset data for the current domain
+        rows_in_domain <- which(domains == d) # Rows in this domain where y is missing
+        y_sub <- y[rows_in_domain]
+        x_sub <- x[rows_in_domain, ]
+        ry_sub <- ry[rows_in_domain]
+        dots_sub <- dots
+        dots_sub$wy <- dots_sub$wy[rows_in_domain]
+
+        # Apply polyreg imputation method for the current domain
+        args_list <- c(list(y_sub, ry_sub, x_sub), dots_sub)
+        imp <- do.call("mice.impute.polyreg", args_list)
+
+        # Assign the imputed values back to the result vector
+        imps[d] <- list(imp)
+      }
+
+      # Order imps content based on domains and locations specified in wy
+      ds <- domains[dots$wy]
+
+      for (d in unique_domains) {
+        imputed[ds == d] <- unlist(imps[d])
+      }
+
+      return(imputed)
+    }
+
+    methods["sub_dom"] <- "imp_sub_domain"
+
+    imp <- mice(dataset, m = m, seed = 1526, predictorMatrix = preds, method = methods)     
+
+    # Save the imputed data
+    write_rds(imp, "data/imputed_data.rds")
+  })
+}
+```
+
+
+
+```{r}
+# From https://www.jepusto.com/mi-with-clubsandwich/
+
+pool_robust <- function(models) {
+  models %>%
+    map(coef_test, vcov = "CR2") %>%
+    # add coefficient names as a column
+    lapply(function(x) {
+      x$coef <- row.names(x)
+      x
+    }) %>%
+    bind_rows() %>%
+    as.data.frame() %>%
+    # summarize by coefficient
+    group_by(coef) %>%
+    summarise(
+      m = n(),
+      B = var(beta),
+      beta_bar = mean(beta),
+      V_bar = mean(SE^2),
+      eta_bar = mean(df_Satt)
+    ) %>%
+    mutate(
+      # calculate intermediate quantities to get df
+      V_total = V_bar + B * (m + 1) / m,
+      gamma = ((m + 1) / m) * B / V_total,
+      df_m = (m - 1) / gamma^2,
+      df_obs = eta_bar * (eta_bar + 1) * (1 - gamma) / (eta_bar + 3),
+      df = 1 / (1 / df_m + 1 / df_obs),
+
+      # calculate summary quantities for output
+      se = sqrt(V_total),
+      t = beta_bar / se,
+      p_val = 2 * pt(abs(t), df = df, lower.tail = FALSE),
+      crit = qt(0.975, df = df),
+      lo95 = beta_bar - se * crit,
+      hi95 = beta_bar + se * crit
+    ) %>%
+    select(coef, est = beta_bar, se, t, df, p_val, lo95, hi95, gamma)
+}
+
+pooled_Wald <- function(models, which_coefs) {
+  # Get coefficients
+  coefs <- models %>% map(coef)
+
+  # Get CR2 variance-covariance matrices
+  vcovs <- models %>% map(vcovCR, type = "CR2")
+
+  ref_coefs <- coefs[[1]] %>%
+    names() %>%
+    str_detect(., which_coefs) %>%
+    which()
+
+
+  message("For ", which_coefs, " now testing: ", coefs[[1]] %>% names() %>% .[ref_coefs] %>% paste(collapse = " "))
+
+  # Get denominator df from complete-data F-tests
+  q <- length(ref_coefs)
+
+  eta <- numeric()
+
+  dfs <-
+    models %>%
+    map_dfr(Wald_test, vcov = "CR2", constraints = constrain_zero(ref_coefs), test = "HTZ") %>%
+    mutate(
+      eta = df_denom + (q - 1)
+    )
+  eta <- mean(dfs$eta)
+
+  # Combine imputed results
+  res <- MIcombine(results = coefs, variances = vcovs)
+  res$coefficients
+
+  Cmat <- constrain_zero(ref_coefs, coefs = res$coefficients)
+  Q <- t(Cmat %*% res$coefficients) %*% solve(Cmat %*% res$variance %*% t(Cmat)) %*% (Cmat %*% res$coefficients)
+  Fstat <- (eta - q + 1) / (eta * q) * as.numeric(Q)
+  p_val <- pf(Fstat, df1 = q, df2 = eta - q + 1, lower.tail = FALSE)
+  tibble(query = which_coefs, Fstat = Fstat, df_num = q, df_denom = eta - q + 1, p_val = p_val)
+}
+```
+
+## Run meta-regression
+
+```{r}
+if (file.exists("data/imp_meta_reg_mods.qs")) {
+  imputed_mods <- qs::qread("data/imp_meta_reg_mods.qs")
+} else {
+  if (!exists("imp")) stop("Imputation object (imp) not found - run/load imputation first.")
+  job::job("Impute meta-regression" = {
+    imp_datasets <- complete(imp, "all")
+    with_progress({
+      p <- progressor(steps = length(imp_datasets), label = "Imputing meta-regression models")
+      imputed_mods <- map(imp_datasets, \(data) {
+        p()
+        try({
+          with(data, {
+            V <- impute_covariance_matrix(
+              vi = var_adj,
+              cluster = articlestudy,
+              r = rho
+            )
+
+            complexity <- factor(complexity, ordered = FALSE) %>% relevel(ref = "high")
+            interdep <- factor(interdep, ordered = FALSE) %>% relevel(ref = "high")
+            longevity <- factor(longevity, ordered = FALSE) %>% relevel(ref = "stable")
+            art_focus <- factor(art_focus) %>% relevel(ref = "focal H")
+            meas_type <- factor(meas_type) %>% relevel(ref = "Variety")
+            rater <- factor(rater) %>% relevel(ref = "Objective")
+            design <- factor(design) %>% relevel(ref = "Observational")
+
+            mod <- rma.mv(
+              r_adj ~ year_merged + complexity + interdep + collectivism +
+                longevity + meas_type + rater + design + art_focus,
+              V = V,
+              random = ~ 1 | articlestudy / effect_id,
+              test = "t",
+              dfs = "contain",
+              sparse = TRUE
+            )
+
+            mod_interact <- rma.mv(
+              r_adj ~ domain * year_merged + domain * complexity + domain * interdep + domain * collectivism +
+                domain * longevity + domain * meas_type + domain * rater + domain * design + domain * art_focus,
+              V = V,
+              random = ~ 1 | articlestudy / effect_id,
+              test = "t",
+              dfs = "contain",
+              sparse = TRUE
+            )
+
+            list(mod = mod, mod_interact = mod_interact)
+          })
+        })
+      })
+      imputed_mods %>% qs::qsave("data/imp_meta_reg_mods.qs")
+      job::export(NULL)
+    })
+  })
+ message("Models will be imputed now in background job - rerun this chunk afterwards to load them.")
+}
+```
+
+```{r}
+# Pool results
+## Remove failed convergence
+m <- length(imputed_mods)
+imputed_mods <- imputed_mods %>% discard(\(x) inherits(x, "try-error"))
+message("Excluded ", m - length(imputed_mods), " models due to convergence issues.")
+
+
+coefs_across <- map(imputed_mods, "mod") %>% pool_robust()
+coefs_domains <- map(imputed_mods, "mod_interact") %>% pool_robust()
+
+cat_moderators <- c("complexity", "interdep", "longevity", "meas_type", "rater", "design", "art_focus")
+cont_moderators <- c("year_merged", "collectivism", "power_distance")
+
+# Run Wald tests
+
+if (file.exists("data/cat_domain_wald_test_multiple.rds")) {
+  cat_interaction_tests <- read_rds("data/cat_domain_wald_test_multiple.rds")
+} else {
+  cat_moderators_regex <- c(
+    paste0("^", cat_moderators),
+    paste0("Cognitive:", cat_moderators),
+    paste0("Job-related:", cat_moderators)
+  )
+
+  # Loop over domains (^, Cognitive:, Job-related:), merge all results
+  cat_interaction_tests <- map(imputed_mods, "mod_interact") %>%
+    {
+      map_dfr(cat_moderators_regex, \(query) pooled_Wald(., query))
+    } %>%
+    mutate(
+      domain = case_when(
+        str_detect(query, "^\\^") ~ "Demographic",
+        str_detect(query, "Cognitive:") ~ "Cognitive",
+        str_detect(query, "Job-related:") ~ "Job-related"
+      ),
+      moderator = query %>% str_remove("^\\^") %>%
+        str_remove("Cognitive:") %>%
+        str_remove("Job-related:"),
+      moderator = sapply(moderator, function(coeff) {
+        matches <- str_detect(coeff, paste0("^", cat_moderators))
+        if (any(matches)) {
+          return(cat_moderators[which.max(matches)]) # Returns the first matched moderator
+        } else {
+          warning("Failed moderator match: ", coeff)
+          return(NA)
+        }
+      })
+    )
+  write_rds(cat_interaction_tests, "data/cat_domain_wald_test_multiple.rds")
+}
+
+if (file.exists("data/cat_overall_wald_test_multiple.rds")) {
+  cat_avg_tests <- read_rds("data/cat_overall_wald_test_multiple.rds")
+} else {
+  cat_avg_tests <- map(imputed_mods, "mod") %>%
+    {
+      map_dfr(cat_moderators, \(query) pooled_Wald(., query))
+    } %>%
+    mutate(domain = "Overall", moderator = sapply(query, function(coeff) {
+      matches <- str_detect(coeff, paste0("^", cat_moderators))
+      if (any(matches)) {
+        return(cat_moderators[which.max(matches)]) # Returns the first matched moderator
+      } else {
+        return(NA)
+      }
+    }))
+  write_rds(cat_avg_tests, "data/cat_overall_wald_test_multiple.rds")
+}
+# Combine all results into 1 table
+coefs_domains %>%
+  filter(map(cont_moderators, \(m) str_detect(coef, m)) %>% Reduce(`|`, .)) %>%
+  mutate(
+    domain = case_when(str_detect(coef, "Cognitive:") ~ "Cognitive",
+      str_detect(coef, "Job-related:") ~ "Job-related",
+      .default = "Demographic"
+    ),
+    moderator = coef %>% str_remove(".*:")
+  ) %>%
+  bind_rows(coefs_across %>% filter(coef %in% cont_moderators) %>% transmute(domain = "Overall", moderator = coef, p_val)) %>%
+  bind_rows(cat_interaction_tests, cat_avg_tests) %>%
+  select(domain, moderator, p_val) %>%
+  rowwise() %>%
+  mutate(
+    p_fmt = paste(fmt_p(p_val, equal_sign = FALSE), sigstars(p_val)),
+    moderator = var_names$new[var_names$old == moderator], position = which(moderator == mod_table$`_data`$Moderator)
+  ) %>%
+  select(moderator, domain, p_fmt, position) %>%
+  pivot_wider(names_from = "domain", values_from = "p_fmt") %>%
+  arrange(position) %>%
+  select(Moderator = moderator, Overall, Demographic, Cognitive, `Job-related`) %>%
+  gt::gt() %>%
+  tab_header(title = "Multivariate (meta-regression) moderator tests") %>%
+  tab_spanner(md("Significance tests (*p*-values)"), Overall:`Job-related`) %>%
+  gt::fmt(fns = md) %>%
+  gt::tab_source_note(timesaveR:::std_stars %>%
+    {
+      glue::glue_collapse(paste(names(.), .), ", ")
+    } %>% html())
+```
+
+# Meta-CART
+
+## Combine ES
+
+```{r}
+dataset_aggregated <- dataset %>% 
+  group_by(articlestudy, pub_status, art_focus, year_merged, design, rater, collectivism, interdep, 
+           complexity, longevity, virtuality, domain, sub_dom, meas_type) %>% 
+  mutate(es_aggregate_id = cur_group_id()) %>% 
+  ungroup()
+  
+dataset_aggregated <- escalc(yi = r_adj, vi = var_adj, data = dataset_aggregated) %>% 
+  aggregate.escalc(cluster = es_aggregate_id, rho = rho, struct = "CS", na.rm = FALSE)
+
+# Remove escalc class to avoid future issues
+dataset_aggregated <- as_tibble(dataset_aggregated)
+
+  # Specify ordered factors
+
+  dataset_aggregated$longevity <- factor(dataset_aggregated$longevity, levels = c("hours", "days", "weeks", "months", "years", "stable"), ordered = TRUE)
+  dataset_aggregated$interdep <- factor(dataset_aggregated$interdep, levels = c("low", "medium", "high"), ordered = TRUE)
+  dataset_aggregated$complexity <- factor(dataset_aggregated$complexity, levels = c("low", "medium", "high"), ordered = TRUE)
+
+qs::qsave(dataset_aggregated, "data/dataset_aggregated_metacart.qs")
+```
+
+From here, the process is probabilistic, as effect sizes will be sampled, and then metaCART run repeatedly. This is very slow, so was run on an AWC EC2 instance - see `helpers/aws_code metacart.R`. The code below is just provided for reference - here, results are loaded from file as downloaded from AWS.
+
+## Impute best and worst case
+
+```{r best-imputation-functions}
+
+dummy_code_df <- function(df, exclude_column, drop_first = TRUE) {
+  if (!is.character(exclude_column)) {
+    stop("exclude_column must be a character string.")
+  }
+  
+  for (col_name in names(df)) {
+    if (col_name != exclude_column && is.factor(df[[col_name]]) && !is.ordered(df[[col_name]])) {
+
+      # Get levels and potentially drop the first one
+      levels_to_dummy <- levels(df[[col_name]])
+      if (drop_first) {
+        levels_to_dummy <- levels_to_dummy[-1]
+      }
+
+      # Create dummy columns for each level
+      for (level in levels_to_dummy) {
+        dummy_name <- paste0(col_name, "_", level) %>% vctrs::vec_as_names(repair = "universal_quiet")
+        df[[dummy_name]] <- df[[col_name]] == level
+      }
+      
+      # Remove the original factor column if not excluded
+      df[[col_name]] <- NULL
+    }
+  }
+  
+  return(df)
+}
+
+# Imputation code derived from mice package (but noise removed to get single best)
+# mice copyright Stef van Buuren - thanks
+
+impute_best_polr <- function(dat, var_name) {
+  dat <- dummy_code_df(dat, var_name)
+
+  collinear <- mice:::find.collinear(dat)
+
+  if (length(collinear) > 0) {
+    dat <- dat[-which(names(dat) %in% setdiff(collinear, var_name))]
+  }
+
+  y_missing <- which(is.na(dat[var_name]))
+
+  f <- setdiff(colnames(dat), var_name) %>%
+    glue::glue_collapse(sep = " + ") %>%
+    paste(var_name, "~", .)
+
+  complete_dat <- dat %>% drop_na(everything())
+
+  ## polr may fail on sparse data. We revert to multinom in such cases.
+  fit <- try({
+    MASS::polr(as.formula(f),
+      data = complete_dat,
+    )
+    post <- predict(fit, dat[is.na(dat[var_name]), ], type = "probs")
+  })
+  if (inherits(fit, "try-error")) {
+    message("polr falls back to multinom")
+    fit <- nnet::multinom(as.formula(f),
+      data = complete_dat,
+      maxit = 100, trace = FALSE,
+      MaxNWts = 1500
+    )
+    post <- predict(fit, dat[is.na(dat[var_name]), ], type = "probs")
+  }
+
+
+  if (length(y_missing) == 1) {
+    temp <- matrix(post, nrow = 1, ncol = length(post))
+    colnames(temp) <- names(post)
+    post <- temp
+  }
+
+  max_col_index <- apply(post, 1, \(x) {
+    if (all(is.na(x))) {
+      return(NA)
+    } else {
+      return(which(x == max(x, na.rm = TRUE)))
+    }
+  })
+
+  new_y <- colnames(post)[max_col_index]
+
+
+  if (length(dat[[var_name]][y_missing]) != length(new_y)) browser()
+
+  dat[[var_name]][y_missing] <- new_y
+
+  message("Imputed ", sum(!is.na(dat[[var_name]][y_missing])), " values.")
+
+
+  dat[[var_name]]
+}
+
+impute_best_polyreg <- function(dat, var_name) {
+  dat <- dummy_code_df(dat, var_name)
+
+  collinear <- mice:::find.collinear(dat)
+
+  if (length(collinear) > 0) {
+    dat <- dat[-which(names(dat) %in% setdiff(collinear, var_name))]
+  }
+
+  y_missing <- which(is.na(dat[var_name]))
+
+  f <- setdiff(colnames(dat), var_name) %>%
+    glue::glue_collapse(sep = " + ") %>%
+    paste(var_name, "~", .)
+
+  complete_dat <- dat %>% drop_na(everything())
+
+
+  fit <- nnet::multinom(as.formula(f),
+    data = complete_dat,
+    maxit = 100, trace = FALSE,
+    MaxNWts = 3000
+  )
+
+  tryCatch(
+    {
+      post <- predict(fit, dat[is.na(dat[var_name]), ], type = "probs")
+      if (length(y_missing) == 1) {
+        temp <- matrix(post, nrow = 1, ncol = length(post))
+        colnames(temp) <- names(post)
+        post <- temp
+      }
+
+      max_col_index <- apply(post, 1, \(x) {
+        if (all(is.na(x))) {
+          return(NA)
+        } else {
+          return(which(x == max(x, na.rm = TRUE)))
+        }
+      })
+      new_y <- colnames(post)[max_col_index]
+
+
+      dat[[var_name]][y_missing] <- new_y
+    },
+    error = \(e) {
+      warning("Prediction failed")
+      return(dat[[var_name]])
+    }
+  )
+
+
+  message("Imputed ", sum(!is.na(dat[[var_name]][y_missing])), " values.")
+
+  dat[[var_name]]
+}
+
+  # Imputation strategy: identify missing patterns, then impute for each pattern so that always the largest available set of predictors is used
+  missing_patterns <- function(dataset, target_var) {
+    dataset <- dataset[is.na(dataset[[target_var]]), ]
+    dataset %>%
+      select(-matches(target_var)) %>%
+      mutate(missing_vars = pmap_chr(., function(...) {
+        vars <- names(c(...))
+        missing <- vars[is.na(c(...))]
+        if (length(missing) == 0) {
+          return(NA_character_)
+        } # Return NA if no missing vars
+        paste(missing, collapse = "|")
+      })) %>%
+      mutate(across(-missing_vars, ~ as.numeric(is.na(.)))) %>%
+      mutate(m = rowSums(across(-missing_vars), na.rm = TRUE)) %>%
+      group_by(missing_vars, m) %>%
+      summarise(n = n(), .groups = "drop") %>%
+      arrange(m, -n)
+  }
+
+  impute_sequentially <- function(dataset, target_var, fun) {
+    missings <- missing_patterns(dataset, target_var)
+    if (any(is.na(missings$missing_vars))) {
+      dataset[[target_var]] <- do.call(fun, list(dataset, target_var))
+    }
+    missings <- missings %>% filter(!is.na(missing_vars))
+    if (nrow(missings) == 0) {
+      return(dataset[[target_var]])
+    }
+    for (i in 1:nrow(missings)) {
+      dataset[[target_var]] <- do.call(fun, list(dataset %>% select(-matches(missings[i, ]$missing_vars)), target_var))
+    }
+    dataset[[target_var]]
+  }
+
+  # For "worst case", impute by drawing random values from observed data
+  impute_with_random_draw <- function(dataframe) {
+    for (col in names(dataframe)) {
+      missing_indices <- which(is.na(dataframe[[col]]))
+      if (length(missing_indices) > 0) {
+        non_missing_values <- dataframe[[col]][!is.na(dataframe[[col]])]
+        if (length(non_missing_values) > 0) {
+          dataframe[[col]][missing_indices] <- sample(non_missing_values, length(missing_indices), replace = TRUE)
+        }
+      }
+    }
+    return(dataframe)
+  }
+
+```
+
+```{r}
+n_datasets <- 10
+n_trees <- 50
+
+if (!file.exists("data/cart_imputed_best.qs") || !file.exists("data/cart_imputed_random.qs")) {
+  set.seed(2124)
+  dataset_aggregated <- qs::qread("data/dataset_aggregated_metacart.qs")
+
+  datasets <- list()
+  datasets_imp_best <- list()
+  datasets_imp_rand <- list()
+
+  # specify variables to include in imputation (those in metaCart and relevant other preds)
+  mi_vars <- c(
+    "art_focus", "pub_status", "design", "setting", "ind_sector", "team_function",
+    "n_teams", "stud_sample",
+    "tmt", "domain", "sub_dom", "meas_type", "rater", "interdep", "complexity", "longevity", "power_distance",
+    "collectivism", "year_merged", "citation_count"
+  )
+
+  # Resample datasets
+  for (i in seq_len(n_datasets)) {
+    datasets[[i]] <- dataset_aggregated %>%
+      group_by(articlestudy, domain) %>%
+      slice_sample(n = 1) %>%
+      ungroup() %>%
+      select(articlestudy, domain, r_adj, se, var_adj, all_of(mi_vars)) %>%
+      mutate(across(c(where(is.character), -articlestudy), factor))
+  }
+
+  # Impute  using best prediction
+
+  ## Define models
+
+  polr_vars <- c("interdep", "complexity", "longevity")
+
+  polyreg_vars <- c(
+    "art_focus", "pub_status", "design", "setting", "ind_sector", "team_function",
+    "stud_sample", "tmt", "domain", "meas_type", "rater"
+  )
+
+  special_var <- c("sub_dom")
+
+  pmm_vars <- c("power_distance", "collectivism")
+
+  for (i in seq_along(datasets)) {
+    datasets_imp_best[[i]] <- datasets[[i]]
+
+    for (var in polr_vars) {
+      if (any(is.na(datasets_imp_best[[i]][[var]]))) {
+        message("\n\n Imputing ", var)
+        datasets_imp_best[[i]][[var]] <- impute_sequentially(datasets_imp_best[[i]] %>% select(-articlestudy), var, impute_best_polr)
+      }
+    }
+
+    for (var in polyreg_vars) {
+      if (any(is.na(datasets_imp_best[[i]][[var]]))) {
+        message("\n\n Imputing ", var)
+        datasets_imp_best[[i]][[var]] <- impute_sequentially(datasets_imp_best[[i]] %>% select(-articlestudy), var, impute_best_polyreg)
+      }
+    }
+
+    # Impute sub-domains by domain, to ensure valid values
+    temp_split <- split(datasets_imp_best[[i]], datasets_imp_best[[i]]$domain)
+    for (domain in names(temp_split)) {
+      temp_split[[domain]]$sub_dom <- impute_sequentially(temp_split[[domain]] %>% select(-articlestudy), "sub_dom", impute_best_polyreg)
+    }
+
+    datasets_imp_best[[i]] <- bind_rows(temp_split)
+
+
+    # For continuous variables, use PMM function in mice
+    imp <- mice(datasets_imp_best[[i]], maxit = 0)
+
+    methods <- imp$method
+    methods[] <- ""
+    methods[pmm_vars] <- "pmm"
+    preds <- imp$predictorMatrix
+    preds[] <- 0
+
+    preds[pmm_vars, mi_vars] <- 1
+    preds[pmm_vars, "r_adj"] <- 1
+    preds[pmm_vars, "se"] <- 1
+    preds[pmm_vars, pmm_vars] <- 0 # Always missing together, so this would not help
+
+    imp <- mice(datasets_imp_best[[i]],
+      m = 1, seed = 2124 + i, predictorMatrix = preds,
+      method = methods, donors = 1
+    )
+
+    datasets_imp_best[[i]] <- datasets_imp_best[[i]] %>%
+      select(-all_of(pmm_vars)) %>%
+      left_join(imp %>% complete() %>% select(articlestudy, domain, all_of(pmm_vars)))
+  }
+
+
+  # Impute  using random prediction
+
+  for (i in seq_along(datasets)) {
+    datasets_imp_rand[[i]] <- datasets[[i]]
+
+
+    datasets_imp_rand[[i]] <- datasets_imp_rand[[i]] %>%
+      select(-sub_dom) %>%
+      impute_with_random_draw() %>%
+      left_join(datasets_imp_rand[[i]] %>% select(articlestudy, domain, sub_dom))
+
+    # Impute sub-domains by domain, to ensure valid values
+    temp_split <- split(datasets_imp_rand[[i]], datasets_imp_rand[[i]]$domain)
+    for (domain in names(temp_split)) {
+      temp_split[[domain]] <- impute_with_random_draw(temp_split[[domain]])
+    }
+
+    datasets_imp_rand[[i]] <- bind_rows(temp_split)
+  }
+  datasets_imp_best %>% qs::qsave("data/cart_imputed_best.qs")
+  datasets_imp_rand %>% qs::qsave("data/cart_imputed_random.qs")
+} else {
+  datasets_imp_rand <- qs::qread("data/cart_imputed_random.qs")
+  datasets_imp_best <- qs::qread("data/cart_imputed_best.qs")
+
+  if (!length(datasets_imp_best) == n_datasets || !length(datasets_imp_rand) == n_datasets) {
+    warning("Number of loaded datasets does not macth `n_datasets`. Consider re-running imputation.")
+  }
+}
+```
+
+## Run meta-CART
+
+```{r}
+
+run_meta_cart <- function(data, reps, seed = NULL, method = c("standard", "ahead")) {
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+  source("helpers/metacart_fix.R") # So that it is available when running in parallel
+  
+  cli::cli_progress_bar(name = "Fitting trees", total = reps)
+  
+  if (method[1] == "standard") {
+    mods <- list()
+    
+  for (i in seq_len(reps)) {
+    mods[i] <- withCallingHandlers({ # Suppress warnings about no moderator effect
+      mod <- try(list(REmrt(r_adj ~ domain + year_merged + complexity + interdep + collectivism + meas_type + rater + design + art_focus + longevity,
+                            data,
+                            vi = var_adj,
+                            c = 0,
+                            maxL = 20,
+                            xval = 10,
+                            lookahead = FALSE
+      )), silent = TRUE)
+      if (inherits(mod, "try-error")) { # Failed on one dataset (best/job-related) in very few cases due to bug in underlying C code.
+        cli::cli_alert_warning("Failed to fit model ", i)
+        mod <- NULL
+      }
+      mod
+    }, warning=function(w) {
+      if (endsWith(conditionMessage(w), "no moderator effect was detected"))
+        invokeRestart("muffleWarning")
+    })
+    cli::cli_progress_update()
+  }
+    cli::cli_progress_done()
+    return(mods)
+  }
+
+  if (method[1] == "ahead") {
+    
+  mods_ahead <- list()
+  
+  for (i in seq_len(reps)) {
+    mods_ahead[i] <- withCallingHandlers({
+      mod <- try(list(REmrt(r_adj ~ domain + year_merged + complexity + interdep + collectivism + meas_type + rater + design + art_focus + longevity,
+                            data,
+                            vi = var_adj,
+                            c = 0,
+                            maxL = 20,
+                            xval = 10,
+                            lookahead = TRUE
+      )), silent = TRUE)
+      if (inherits(mod, "try-error")) { 
+        cli::cli_alert_warning("Failed to fit lookahead model ", i)
+        mod <- NULL
+      }
+      mod
+    }, warning=function(w) {
+      if (endsWith(conditionMessage(w), "no moderator effect was detected"))
+        invokeRestart("muffleWarning")
+    })
+    cli::cli_progress_update()
+    
+  }
+  cli::cli_progress_done()
+  return(mods_ahead)
+  } else {
+    stop("Invalid method specified")
+  }
+}
+
+  datasets_imp_best_list <- list()
+  datasets_imp_rand_list <- list()
+  
+  datasets_imp_best <- datasets_imp_best %>% set_names(as.character(seq_along(.)))
+  datasets_imp_rand <- datasets_imp_rand %>% set_names(as.character(seq_along(.)))
+  
+  for (i in seq_along(datasets_imp_best)) {
+    datasets_imp_best_list[[i]] <- split(datasets_imp_best[[i]], datasets_imp_best[[i]]$domain)
+    datasets_imp_best_list[[i]][["Overall"]] <- datasets_imp_best[[i]]
+  }
+  
+  datasets_imp_best_list <- list_transpose(datasets_imp_best_list)
+  
+  for (i in seq_along(datasets_imp_best)) {
+    datasets_imp_rand_list[[i]] <- split(datasets_imp_rand[[i]], datasets_imp_rand[[i]]$domain)
+    datasets_imp_rand_list[[i]][["Overall"]] <- datasets_imp_rand[[i]]
+  }
+  
+  datasets_imp_rand_list <- list_transpose(datasets_imp_rand_list)
+  
+  datasets_imp <- list(best = datasets_imp_best_list, rand = datasets_imp_rand_list)
+  
+  datasets_imp <- datasets_imp %>%
+    list_flatten() %>%
+    list_flatten()
+  
+  datasets_imp <- datasets_imp[order(sapply(datasets_imp, nrow))]
+  
+  cores <- future::availableCores()
+  
+  plan(multisession, workers = cores)
+  
+if (!(file.exists("data/metacart_trees_standard.qs"))) {
+
+
+  trees_standard <- future_imap(datasets_imp, 
+                       ~{
+                         # Extract the index from names to use as seed offset
+                         index <- which(names(datasets_imp) == .y)
+                         # Calculate a unique seed for each run
+                         specific_seed <- 12345 + index
+                         
+                         # Run the function with the specific seed
+                         result <- run_meta_cart(.x, reps = n_trees, seed = specific_seed, method = "standard")
+                         
+                         # Save the result using the name of the dataset
+                         qsave(result, paste0(.y, "_standard.qs"))
+                         
+                         # Return result if needed
+                         result
+                       }, 
+                       .progress = TRUE, .options = furrr_options(seed = TRUE))
+  qs::qsave(trees_standard, "data/metacart_trees_standard.qs")
+} else {
+  trees <- qs::qread("data/metacart_trees_standard.qs")
+}
+
+if (!(file.exists("data/metacart_trees_ahead.qs"))) {
+  trees_ahead <- future_imap(datasets_imp, 
+                             ~{
+                               # Extract the index from names to use as seed offset
+                               index <- which(names(datasets_imp) == .y)
+                               # Calculate a unique seed for each run
+                               specific_seed <- 12345 + index
+                               
+                               # Run the function with the specific seed
+                               result <- run_meta_cart(.x, reps = n_trees, seed = specific_seed, method = "ahead")
+                               
+                               # Save the result using the name of the dataset
+                               qsave(result, paste0(.y, "_ahead.qs"))
+                               
+                               # Return result if needed
+                               result
+                             }, 
+                             .progress = TRUE, .options = furrr_options(seed = TRUE))
+  
+  qs::qsave(trees_ahead, "data/metacart_trees_ahead.qs")
+} else {
+  trees_ahead <- qs::qread("data/metacart_trees_ahead.qs")
+}
+```
+
+## Aggregate multiple runs
+
+```{r}
+trees_standard <- qs::qread("data/metacart_trees_standard.qs")
+trees_ahead <- qs::qread("data/metacart_trees_ahead.qs")
+
+get_mode <- function(x) {
+  tbl <- table(x)
+  mode_val <- names(tbl)[which(tbl == max(tbl, na.rm = TRUE))]
+  paste(mode_val, collapse = " | ")
+}
+
+leaf_counts <- trees_standard %>% 
+  imap_dfr(\(mods, dataset) {
+    mods %>% discard(is.null) %>% map_int(\(mod) length(mod$n)) %>% tibble(n = .) %>% 
+  summarise(mean = mean(n, na.rm = TRUE), median = median(n, na.rm = TRUE), 
+            mode = get_mode(n), max = max(n, na.rm = TRUE), min = min(n, na.rm = TRUE), ns = list(n)) %>% 
+  mutate(dataset = dataset) 
+  }) %>% mutate(cart_method = "standard")  %>% 
+  separate(dataset, into = c("imp_method", "domain", "run"), sep = "_") 
+
+leaf_counts %>% group_by(imp_method, domain) %>% 
+  summarise(mode = get_mode(unlist(ns)),
+            any_moderation = mean(unlist(ns) > 1),
+            potential_interactions = mean(unlist(ns) > 2),
+            .groups = "drop")
+
+moderator_combinations <- trees_standard %>% 
+  imap_dfr(\(mods, dataset) {
+    mods %>% discard(is.null) %>% map_chr(\(mod) mod$moderators %>% sort() %>% paste(collapse = " | ") %>% na_if("")) %>% tibble(moderators = .) %>% 
+ count(moderators, sort = TRUE) %>% 
+  mutate(dataset = dataset) 
+  }) %>% mutate(cart_method = "standard")  %>% 
+  separate(dataset, into = c("imp_method", "domain", "run"), sep = "_") %>% 
+  group_by(imp_method, domain, moderators, cart_method) %>%
+  summarise(n = sum(n), .groups = "drop") %>% 
+  arrange(imp_method, domain, cart_method, desc(n))
+
+
+moderator_combinations_long <- moderator_combinations %>% 
+    rename(data_domain = domain) %>% 
+    mutate(row_id = row_number()) %>%
+    separate_rows(moderators, sep = " \\| ") %>%
+    mutate(value = TRUE) 
+
+# Which variables are frequently identified as moderators?
+moderator_combinations_long %>% 
+  group_by(imp_method, data_domain, cart_method, moderators) %>% 
+  summarise(n = sum(n), share = sum(n)/500, .groups = "drop") %>% 
+  rename(moderator = moderators) %>% 
+  filter(!is.na(moderator)) %>% 
+  arrange(imp_method, data_domain, cart_method, desc(share)) %>% 
+  filter(share >= 0.1)
+
+# Which combinations of at least 2 moderators occur
+moderator_combinations_wide <- moderator_combinations_long %>% 
+  filter(!is.na(moderators)) %>% 
+  pivot_wider(names_from = moderators, values_from = value, 
+  values_fill = list(value = FALSE)) %>% 
+  select(-row_id) %>%
+  mutate(n_mods = rowSums(across(-c(imp_method, data_domain, cart_method, n)))) %>% 
+  filter(n_mods > 1)
+
+
+# Function to sum 'n' for all rows that include at least the specified pattern
+sum_n_for_pattern <- function(data, pattern) {
+  pattern_data <- data[ , c("n", pattern)]
+  matching_rows <- apply(pattern_data[ , -1], 1, function(x) all(x, na.rm = TRUE))
+  sum(data$n[matching_rows])
+}
+
+# Generating all possible combinations of the logical columns
+logical_columns <- names(moderator_combinations_wide)[which(sapply(moderator_combinations_wide, is.logical))]
+combinations <- map(2:length(logical_columns), ~combn(logical_columns, .x, simplify = FALSE)) %>% unlist(recursive = FALSE)
+
+# Applying the function for each combination within each group
+pattern_sums_grouped <- moderator_combinations_wide %>%
+  group_by(data_domain, cart_method) %>%
+  group_modify(~map_dfr(combinations, function(comb) {
+    pattern <- paste(comb, collapse=" & ")
+    sum_n <- sum_n_for_pattern(.x, comb)
+    tibble(pattern = pattern, sum_n = sum_n, share = sum_n/1000)
+  })) %>%
+  ungroup()
+
+pattern_sums_grouped %>% filter(sum_n != 0) %>% 
+  arrange(data_domain, cart_method, desc(share)) %>% 
+  filter(share >= 0.05)
+
+```

@@ -1,0 +1,347 @@
+---
+title: "Diversity and team-performance meta-analysis"
+description: null
+output:
+  html_document:
+    theme: united
+    toc: yes
+    code_folding: hide
+  pdf_document:
+    fig_height: 6
+    fig_width: 8
+  word_document: default
+Author: Lukas Wallrich 
+---
+
+```{r setup, include=FALSE}
+## This block ...
+## ... loads, merges and renames the dataset
+
+if (!require(groundhog)) install.packages('groundhog')
+groundhog::groundhog.library(c("readxl", "metafor", "tidyverse", "clubSandwich", "cli", "rsprite2", "esc",
+                               "ggbreak", "gt", "gtExtras", "psych", "furrr", "progressr"), date = "2023-07-09")
+
+
+# Need more recent version of patchwork due to faceting bug
+groundhog::groundhog.library(c("sf", "rworldmap", "numform", "patchwork"), date = "2023-07-09")
+
+groundhog::groundhog.library(c("lukaswallrich/timesaveR"), date = "2023-07-09")
+
+
+source("helpers/helpers.R")
+source("helpers/equivalence_testing.R")
+dataset <- read_rds("data/full_dataset.rds")
+# Assumed correlation between dependent effect sizes
+rho <- 0.6
+```
+
+# Publication bias analyses
+
+```{r filter-datasets}
+datasets_pub <- dataset %>% 
+  filter(pub_status == "Published") %>% 
+  split(.$domain)
+
+# Exploratory analysis - are *claims* about diversity shaped by publication bias?
+datasets_pub_focal <- dataset %>% 
+  filter(pub_status == "Published", art_focus == "focal H") %>% 
+  split(.$domain)
+
+
+```
+
+(Rodgers & Pustejovsky, 2021). In line with the simulation results and recommendations by Rodgers and Pustejovsky, we used two methods to test for publication bias. Firstly, 
+
+## Funnel plots
+
+We used an Egger’s regression test to assess the asymmetry of the funnel plot, with Robust Variance Estimation (RVE) taking care of dependence between effect sizes. In order to strike an appropriate balance between statistical power and Type I errors, we followed the common practice highlighted by Siegel and colleagues (2021) and interpreted p-values below .1 as evidence for publication bias.
+
+Given that publication bias tests are assessments of what is reported in the literature, they are based on *unadjusted* correlation coefficients and standard errors. As the dataset included a few estimates based on small samples, with very large standard errors, we trimmed the funnel plots at the 1% percentile of the standard error distribution to improve legibility. The Egger's regression tests were conducted on the full sample.
+
+```{r funnel-and-eggers, fig.width=18, fig.height=9}
+
+funnel_plots <- list()
+
+trim_pct <- 1
+
+max_se <- dataset %>% 
+    filter(pub_status == "Published", art_focus == "focal H") %>% 
+  pull(se) %>% quantile(1-trim_pct/100)
+
+for (domain in names(datasets_pub)) {
+
+cur_data <- datasets_pub[[domain]] 
+
+# Load earlier estimate?
+confidence_intervals <- read_rds("data/main_meta_res.rds")
+
+estimate <- confidence_intervals$beta[confidence_intervals$Coef == paste0("domain", domain)]
+se <- confidence_intervals$SE[confidence_intervals$Coef == paste0("domain", domain)]
+
+# Now, compute vectors of the lower-limit and upper limit values for the 95% CI around the metanalytic estimate
+se.seq = seq(0,  max_se, 0.001)
+ll95 = estimate - (1.96*se.seq)
+ul95 = estimate + (1.96*se.seq)
+
+# And the various around 0
+ll95_0 = 0 - (1.96*se.seq)
+ul95_0 = 0 + (1.96*se.seq)
+ll90_0 = 0 - (1.65*se.seq)
+ul90_0 = 0 + (1.65*se.seq)
+ll99_0 = 0 - (2.58*se.seq)
+ul99_0 = 0 + (2.58*se.seq)
+
+# Now, smash all of those calculated values into one data frame (called 'dfCI').
+dfCI <- data.frame(ll95, ul95, ll95_0, ul95_0, ll99_0, ul99_0, ll90_0, ul90_0, se.seq, estimate)
+ 
+# Add a color column to the dataset based on the specified criteria
+cur_data$color <- ifelse(cur_data$art_focus == "focal H", 
+                        "darkblue",
+                        "lightblue")
+
+
+   V <- with(cur_data,
+            impute_covariance_matrix(vi = se^2,
+                                    cluster = articlestudy,
+                                    r = rho))
+
+    egger_multi <- rma.mv(yi = r_rep, V = V, random = ~ 1 | articlestudy / effect_id, mods = ~ se, data = cur_data)
+    
+    
+    coefs <-  coef_test(egger_multi, vcov = "CR2")
+    
+    eggers_label <- glue::glue("Egger's regression test for {domain %>% tolower()} diversity (with RVE):<br> β = {round(coefs$beta[2], 2)}, *t*({round(coefs$df_Satt[2], 1)}) = {round(coefs$t[2], 2)}, *p* {fmt_p(coefs$p[2])}")
+
+fill_colors <- c("n.s." = "white", "*p* < .1" = "#90EE90", "*p* < .05" = "#32CD32", "*p* < .01" = "#006400")
+
+# Make the funnel plot.
+funnel_plots[domain] <- list(ggplot(data = cur_data) +
+  xlab('r') + ylab('Standard Error') +
+    annotate("rect", xmin = -1, xmax = 1, ymin = 0, ymax = max(dfCI$se.seq), fill = "#006400") +
+  geom_ribbon(data = dfCI, aes(xmin = ll99_0, xmax = ul99_0, y = se.seq, fill = "*p* < .05")) +
+  geom_ribbon(data = dfCI, aes(xmin = ll95_0, xmax = ul95_0, y = se.seq, fill = "*p* < .1" )) +
+geom_ribbon(data = dfCI, aes(xmin = ll90_0, xmax = ul90_0, y = se.seq, fill = "n.s.")) +
+  # Dummy layer for the annotated color
+  geom_ribbon(aes(y = 0, xmin = Inf, xmax = Inf, fill = "*p* < .01")) +
+
+    scale_fill_manual("Significance", values = fill_colors) + 
+    geom_point(aes(y = se, x = r_rep, color = color), alpha = .6) +
+  scale_color_identity() +
+  geom_line(aes(y = se.seq, x = ll95), linetype = 'dotted', linewidth = .5, data = dfCI) +
+  geom_line(aes(y = se.seq, x = ul95), linetype = 'dotted', linewidth = .5, data = dfCI) +
+  geom_line(aes(x = estimate, y = se_range),
+            data = tibble(estimate = estimate, se_range = c(0, max(dfCI$se.seq))),
+            linetype = 'dotted', color = 'darkblue', linewidth = .5) +
+  scale_x_continuous() +
+  coord_cartesian(xlim = c(-1, 1), ylim = c(max(dfCI$se.seq), 0), expand = FALSE) +
+  #scale_y_continuous(trans = "reverse", limits = c(0, -max(dfCI$se.seq))) + 
+  labs(subtitle = paste0(domain %>% str_remove("domain"), " diversity"),
+       caption = eggers_label, x = "*r*", y = "Standard error") +
+    theme(plot.caption = ggtext::element_markdown(),
+          axis.title.x = ggtext::element_markdown(),
+          legend.text = ggtext::element_markdown(),
+          panel.grid = element_blank()))
+}
+
+
+funnels <- wrap_plots(funnel_plots, ncol = 3, tag_level = "new", guides = "collect")
+
+ggsave("figures/funnel_plots.png", funnels, width = 30, height = 15, dpi = 300, units = "cm")
+
+funnels
+
+```
+
+There is no evidence that effect size is associated with standard errors for demographic and job-related diversity - so that *positive* results appear to be no more likely to be published than others. Note that this does not enable us to test for publication bias in favour of significant results in *either* direction. 
+
+Surprisingly, positive results in small studies on cognitive diversity appear *less* likely to get published for cognitive diversity. However, it appears more plausible that these are small study effects other than publication bias against significant studies.
+
+## 3 PSM
+
+Secondly, we planned to use the 3-parameter selection model (3PSM) to directly estimate whether non-significant results have a lower chance of being published than significant findings. However, this model assumes selection for direction *and* significance, which would be inappropriate for the current data where hypotheses point in varying directions. Consequently, we extended the model to estimate selection for both positive and negative significant results by including two cut-points.
+
+Selection models (of either type) cannot presently be extended to account for dependent effect sizes but sampling one effect size per sample results in a test that combines comparatively high power with a predictable Type I error rate. Therefore, we bootstrapped 3PSM with effect size sampling, and report the median results and distribution of 5,000 bootstrap resamples. Roders & Pustejovsky show that sampling leads to much lower Type I error rates than ignoring dependency or aggregating effects for 3PSM. Given that an alpha level of .05 is associated with a Type I error rate of up to 10%, we relied on this threshold (Rodgers & Pustejovsky, 2021). 
+
+Most recent (preliminary) results by Pustejovsky (2023 - https://www.jepusto.com/cluster-bootstrap-selection-model/) suggest that the cluster bootstraps (i.e. sampling at the study rather than the effect size level) may be the most accurate method for estimating selection models in the presence of dependent effects, so that we present this approach as supplementary.
+
+Bootstrapping these models takes a considerable amount of time, so was done on an AWS virtual machine. The full code is provided in `helpers/aws_code 3PSM.R`, and below as an illustration.
+
+
+```{r bootstrap-3psm}
+# Define a function for the selection model
+apply_selmodel <- function(data, boot_method = c("within", "cluster")) {
+  if (boot_method == "within") {
+     data <- data %>% group_by(articlestudy) %>% sample_n(1) %>% ungroup() %>%   # Sample one effect size per study
+       sample_n(nrow(.), replace = TRUE) # Create bootstrap sample
+  } else if (boot_method == "cluster") {
+    data <- data %>% nest(.by = articlestudy, .key = "data") %>% sample_n(nrow(.), replace = TRUE) %>% unnest(data)
+  } else {
+    stop("Invalid boot_method")
+  }
+  
+    run_selmodel <- function (data) {
+    # Fit the model
+    m.rma <- rma(yi = r_rep,        
+                sei = se,
+                data = data,
+                slab = articlestudy,
+                method = "REML",
+                test = "knha")
+    
+    selmodel(m.rma,
+            type = "stepfun",
+            skiphes = TRUE, skiphet = TRUE, # turn off SE and het-test calculations to accelerate,
+            steps = c(0.025, .05, .95, .975)) %>%  # Selection for both positive and negative sig values
+        summary()
+    
+    }
+    
+    run_selmodel <- purrr::possibly(run_selmodel, otherwise = NA)
+    
+    psm_mod <- run_selmodel(data)
+    
+    browser()
+    
+    if (is.na(psm_mod[1])) {
+      return(tibble()) 
+    } else {
+
+    # Create dataframe with the required elements
+    tibble(
+        lrt = psm_mod$LRT, 
+        p_table = list(psm_mod$ptable %>% mutate(prob = psm_mod$delta))
+    )
+    }
+}
+
+# Bootstrap sampling and applying 3PSM
+set.seed(123) 
+n_bootstraps <- 5000
+plan(multisession, workers = 6)
+
+if (!file.exists("data/sel_models_within.qs")) {
+  with_progress({
+   p <- progressor(steps = n_bootstraps * 3, label = "Bootstrapping")
+sel_models_within <- map_dfr(datasets_pub, \(domain_data) {
+  future_map_dfr(seq_len(n_bootstraps) %>% set_names(), \(i) {
+    p()
+    apply_selmodel(domain_data, boot_method = "within")
+  }, .id = "run", .options = furrr_options(seed = TRUE))}, .id = "domain")  
+ })
+} else {
+  sel_models_within <- qs::qread("data/sel_models_within.qs")
+}
+
+if (!file.exists("data/sel_models_cluster.qs")) {
+
+with_progress({
+   p <- progressor(steps = n_bootstraps * 3, label = "Bootstrapping")
+   sel_models_cluster <- map_dfr(datasets_pub, \(domain_data) {
+   future_map_dfr(seq_len(n_bootstraps) %>% set_names(), \(i) {
+     p()
+     apply_selmodel(domain_data, boot_method = "cluster")
+   }, .id = "run", .options = furrr_options(seed = TRUE))}, .id = "domain")  
+ })
+} else {
+  sel_models_cluster <- qs::qread("data/sel_models_cluster.qs")
+}
+```
+
+```{r plot-3psm, fig.width=12, message=FALSE} 
+# Calculate median estimates
+within_ps <- map2_dfr(sel_models_within$domain, sel_models_within$p_table, \(d, ptab) 
+                      ptab %>% rownames_to_column() %>% mutate(domain = d))
+median_estimate_within <- within_ps %>% group_by(rowname, domain) %>% summarise(p = median(prob), .groups = "drop")
+
+cluster_ps <- map2_dfr(sel_models_cluster$domain, sel_models_cluster$p_table, \(d, ptab) 
+                      ptab %>% rownames_to_column() %>% mutate(domain = d))
+median_estimate_cluster <- cluster_ps  %>% group_by(rowname, domain) %>% summarise(p = median(prob), .groups = "drop")
+
+ps_summary <- within_ps %>% mutate(method = "within") %>% 
+  bind_rows(cluster_ps %>% mutate(method = "cluster")) %>%
+  mutate(group = rowname) %>% 
+  separate_rows(rowname, sep = "<=|<|>") %>% 
+    filter(rowname != " p ") %>%
+    mutate(p = as.numeric(rowname)) %>%
+  group_by(domain, method, group, p) %>%
+  summarise(median = median(prob),
+         ci_low95 = quantile(prob, .025),
+         ci_high95 = quantile(prob, .975),
+         ci_low90 = quantile(prob, .05),
+         ci_high90 = quantile(prob, .95), .groups = "drop") %>% 
+  mutate(p = 1-p) %>% 
+  arrange(desc(row_number())) %>% 
+  mutate(sig = ifelse(sign(ci_low95-1) == sign(ci_high95-1), "*", 
+                      ifelse(sign(ci_low90-1) == sign(ci_high90-1), "†", ""))) 
+
+sig_segments <- ps_summary %>% 
+  filter(sig != "", ci_low95 != ci_high95) %>% # Remove reference category 
+  group_by(domain, method, group, median, ci_low95, ci_high95, sig) %>% 
+  summarise(p = min(p) + .0125, .groups = "drop") %>% 
+  mutate(p = case_when(
+           round(p, 4) == 0.0625 ~ .1,
+           .default = p
+         )) 
+
+es_plt <- ps_summary %>% 
+  filter(method == "cluster") %>% 
+  ggplot(aes(x = p, y = median, color = domain)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_low95, ymax = ci_high95, fill = domain), alpha = .2, linewidth = 0) + 
+  facet_wrap(~domain, ncol = 1,                 strip.position="right") + 
+  scale_y_log10(breaks = c(.25, .5, 1, 2, 4), labels = c(.25, .5, 1, 2, 4)) +
+  scale_x_continuous(breaks = c(.025, .05, .1, .95, .975), labels = c("< .05 (neg)", "< .1", "n.s.", "< .1", "< .05 (pos)")) +
+  scale_x_break(c(.11, .93), space = 0, expand = FALSE) + 
+  labs(subtitle = "Effect size bootstrapping", y = "Relative publication odds", x = "Significance level and direction") + 
+  theme_minimal() + 
+  theme(legend.position = "none",
+        axis.title.x = ggtext::element_markdown()) + 
+  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") + 
+  geom_text(data = sig_segments %>% filter(method == "cluster"), aes(x = p, y = median, label = sig), color = "black", size = 5, nudge_y = .1)
+  
+cluster_plt <- ps_summary %>% 
+  filter(method == "within") %>% 
+  ggplot(aes(x = p, y = median, color = domain)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_low95, ymax = ci_high95, fill = domain), alpha = .2, linewidth = 0) + 
+  facet_wrap(~domain, ncol = 1,                 strip.position="right") + 
+  scale_y_log10(breaks = c(.25, .5, 1, 2, 4), labels = c(.25, .5, 1, 2, 4)) +
+  scale_x_continuous(breaks = c(.025, .05, .1, .95, .975), labels = c("< .05 (neg)", "< .1", "n.s.", "< .1", "< .05 (pos)")) +
+  scale_x_break(c(.11, .93), space = 0, expand = FALSE) + 
+  labs(subtitle = "Cluster bootstrapping", y = "", x = "Significance level and direction") + 
+    theme_minimal() + 
+  theme(legend.position = "none",
+        axis.title.x = ggtext::element_markdown()) + 
+  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40")+ 
+  geom_text(data = sig_segments %>% filter(method == "within"), aes(x = p, y = median, label = sig), color = "black", size = 5, nudge_y = .1)
+
+selection_model <- es_plt + cluster_plt
+
+ggsave("figures/selection_model.png", selection_model)
+
+selection_model
+```
+
+
+```{r table-3psm}
+ps_summary %>% 
+  mutate(`Significance level` = case_when(
+group == "0     < p <= 0.025" ~ "*p* < .05 (pos)",
+group == "0.025 < p <= 0.05" ~ "*p* < .1 (pos)",
+group == "0.05  < p <= 0.95" ~ "n.s.",
+group == "0.95  < p <= 0.975" ~ "*p* < .1 (neg)",
+group == "0.975 < p <= 1" ~ "*p* < .05 (neg)",
+TRUE ~ NA_character_
+),
+`Publication Odds` = case_when(`Significance level` == "*p* < .05 (pos)" ~ "1 (reference)",
+                               TRUE ~ glue::glue("{round_(median)} {fmt_ci(ci_low95, ci_high95)} {sig}"))) %>%
+  select(Domain = domain, method, `Significance level`, `Publication Odds`) %>%
+  distinct() %>%
+  pivot_wider(names_from = method, values_from = c(`Publication Odds`), names_glue = "Publication Odds ({method})") %>%
+  group_by(Domain) %>% 
+  gt() %>% 
+  fmt_markdown(columns = c(`Significance level`)) %>%
+  gt_apa_style() 
+```
+
+Here, the results do not show any publication bias against non-significant results - in fact, the estimated odds for the publication of non-significant results are higher than for positive significant results (though only significantly so for job-related diversity). This suggests that the dataset is not substantially biased towards significant results. Concerningly, however, it appears that for demographic diversity, the publication odds for *negative* significant results are lower than those for *positive* significant results, which suggests a potential bias towards positive results (and thus inflated effect sizes) in this domain.

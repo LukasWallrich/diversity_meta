@@ -1,0 +1,960 @@
+---
+title: "Diversity and team-performance meta-analysis"
+description: null
+output:
+  html_document:
+    theme: united
+    toc: yes
+    code_folding: hide
+  pdf_document:
+    fig_height: 6
+    fig_width: 8
+Author: Lukas Wallrich 
+---
+
+# Overview
+
+This file
+
+- loads the data from our coding sheets (for English and non-English sources), 
+- merges and aligns it, 
+- converts effect sizes to Pearson's r, 
+- deals with attenuation and special sample sizes (repeated measured, sampled outputs), 
+- and then describes / visualizes the sample.
+
+```{r setup, message=FALSE}
+# For reproducibility package versions are locked to a specific date
+if (!require(groundhog)) install.packages('groundhog')
+groundhog::groundhog.library(c("readxl", "metaforest", "metafor", "tidyverse", "clubSandwich", "cli", "rsprite2", "esc",
+                               "mice", "metacart", "gt", "gtExtras", "psych", "furrr", "progressr"), date = "2023-07-09")
+groundhog::groundhog.library(c("lukaswallrich/timesaveR"), date = "2023-07-09")
+
+# Need more recent version of patchwork due to faceting bug
+groundhog::groundhog.library(c("sf", "rworldmap", "numform", "patchwork"), date = "2023-07-09")
+
+source("helpers/helpers.R")
+source("helpers/equivalence_testing.R")
+
+# Read M/SD as character to retain trailing 0s for GRIM/GRIMMER
+col_types_en <- c(rep("?", 56), rep("_", 8))
+col_types_en[c(3, 33:35, 42:45)] <- "c"
+col_types_en <- paste0(col_types_en, collapse = "")
+
+googlesheets4::gs4_deauth()
+effect_sizes_en <- googlesheets4::read_sheet("https://docs.google.com/spreadsheets/d/1pEYZUZvFr8qmULT077y932BUShpJvhs-asRuyyiBKlQ/edit#gid=1628922200", 
+                                             sheet = "Unified Coding",
+                                             skip = 2,
+                                             col_types = col_types_en,
+                                              na = c("#N/A", "NA", "")) %>% 
+                              filter(!is.na(ID)) %>% 
+  mutate(ID = str_remove(ID, "\\.0$"))
+
+col_types_nen <- c(rep("?", 59), rep("_", 8))
+col_types_nen[c(36:38, 45:48)] <- "c"
+col_types_nen <- paste0(col_types_nen, collapse = "")
+
+effect_sizes_n_en <- googlesheets4::read_sheet("https://docs.google.com/spreadsheets/d/1XCjlC3u7Ws2KCjaRQ1R0VuU0mLQ5mHVipmzuGtivLCs/edit#gid=1553069535", 
+                                             sheet = "Unified Coding",
+                                             skip = 2,
+                                             col_types = col_types_nen,
+                                              na = c("#N/A", "NA", "")) %>% 
+                              filter(!is.na(ID)) %>%  filter(is.na(Excluded) | Excluded != "yes") %>% 
+    mutate(ID = str_remove(ID, "\\.0$"))
+
+# Save data to record version used
+qs::qsave(effect_sizes_en, "data/effect_sizes_en.qs")
+qs::qsave(effect_sizes_n_en, "data/effect_sizes_n_en.qs")
+
+# Rename variables
+rename_vec_en <- c(
+  NULL = "double coded",
+  id = "ID",
+  effect_id = "effect_id",
+  title = "Title",
+  author_year = "Author (Year)",
+  NULL = "File", # Only contains "PDF", not the link
+  file = "File URL",
+  year = "Year",
+  NULL = "Coder",
+  NULL = "Status",
+  NULL = "Date coded",
+  study = "Study",
+  sample = "Sample",
+  art_focus = "Article focus",
+  pub_status = "Publication status",
+  nonlin_rel = "Non-linear relationship",
+  gen_notes =  "General Notes",
+  design = "Design",
+  setting = "Setting",
+  ind_sector = "Industry/sector",
+  team_function = "Function",
+  country = "Country",
+  n_teams = "N teams",
+  n_obs = "N obs",
+  stud_sample = "Student sample",
+  tmt = "TMT",
+  year_coll = "Year collected (if reported)",
+  domain = "Domain",
+  sub_dom = "Sub-domain",
+  div_specific = "Specify",
+  meas_type = "Measure type",
+  items_div = "Items...31",
+  opts_div = "Options...32",
+  m_div = "M...33",
+  sd_div = "SD...34",
+  reliab_div = "Reliability Cronbach's alpha (or note)...35",
+  notes_div = "Notes...36",
+  name_perf = "Name",
+  criterion = "Criterion",
+  rater = "Rater",
+  items_perf = "Items...40",
+  opts_perf = "Options...41",
+  m_perf = "M...42",
+  sd_perf = "SD...43",
+  reliab_perf = "Reliability Cronbach's alpha (or note)...44",
+  notes_perf = "Notes...45",
+  r = "r",
+  d = "d",
+  other = "other",
+  stats_notes = "Statistics Notes",
+  interdep = "Interdependence",
+  complexity = "Complexity",
+  longevity = "Longevity",
+  virtuality = "Virtuality",
+  auth_diff = "Authority differentiation",
+  div_climate = "Diversity climate",
+  psych_safe = "Psych safety"
+)
+
+rename_vec_n_en <- c(
+  id = "ID",
+  effect_id = "rowid",
+  NULL = "Title",
+  NULL = "File Or", 
+  NULL = "File En",
+  file = "File Or URL", # Contains original URL
+  year = "Year",
+  author_year = "Author (Year)",
+  NULL = "Coder",
+  NULL = "Status",
+  NULL = "Date coded",
+  study = "Study",
+  sample = "Sample",
+  language = "Language",
+  art_focus = "Article focus",
+  pub_status = "Publication status",
+  nonlin_rel = "Non-linear relationship",
+  gen_notes = "General Notes",
+  design = "Design",
+  setting = "Setting",
+  ind_sector = "Industry/sector", 
+  team_function = "Function",
+  country = "Country",
+  n_teams = "N teams",
+  n_obs = "N obs", 
+  stud_sample = "Student sample",
+  tmt = "TMT",
+  year_coll = "Year collected (if reported)",
+  domain = "Domain",
+  sub_dom = "Sub-domain",
+  div_dom_specific = "Specify...31",  
+  meas_type = "Measure type",
+  div_specific = "Specify...33", 
+  items_div = "Items...34",  
+  options_div = "Options...35",  
+  m_div = "M...36",  
+  sd_div = "SD...37", 
+  reliab_div = "Reliability Cronbach's alpha (or note)...38",  
+  notes_div = "Notes...39",  
+  name_perf = "Name",
+  criterion = "Criterion",
+  rater = "Rater",
+  items_perf = "Items...43",  
+  options_perf = "Options...44",  
+  m_perf = "M...45",  
+  sd_perf = "SD...46",  
+  reliab_perf = "Reliability Cronbach's alpha (or note)...47",  
+  notes_perf = "Notes...48",
+  r = "r",
+  d = "d",
+  other = "other",
+  stats_notes = "Statistics Notes",
+  interdep = "Interdependence",
+  complexity = "Complexity",
+  longevity = "Longevity",
+  virtuality = "Virtuality",
+  auth_differentiation = "Authority differentiation",
+  div_climate = "Diversity climate",
+  psych_safe = "Psych safety"
+)
+
+names(effect_sizes_en) <- names(effect_sizes_en) %>% str_replace("\n", " ") %>% str_squish()
+names(effect_sizes_n_en) <- names(effect_sizes_n_en) %>% str_replace("\n", " ") %>% str_squish()
+effect_sizes_en <- effect_sizes_en %>% select(rename_vec_en[!names(rename_vec_en)=="NULL"])
+effect_sizes_n_en <- effect_sizes_n_en %>% select(rename_vec_n_en[!names(rename_vec_n_en)=="NULL"])
+
+dataset <- effect_sizes_en %>%
+  mutate(articlestudy = paste(id, study, sample, sep = "/"),
+         language = "english") %>%
+  group_by(articlestudy) %>%
+  mutate(effect_id = row_number()) %>%
+  ungroup()  %>% 
+  # Disambiguate author_year
+  group_by(author_year)  %>% 
+  mutate(id_rank = match(id, unique(id))) %>%
+  mutate(author_year = ifelse(max(id_rank) > 1, 
+                               paste0(author_year, letters[id_rank]), 
+                               author_year)) %>%
+  ungroup() %>%
+  select(-id_rank)
+
+dataset_nen <- effect_sizes_n_en %>%
+  mutate(articlestudy = paste(id, study, sample, sep = "/")) %>%
+  group_by(articlestudy) %>%
+  mutate(effect_id = row_number()) %>%
+  ungroup()  %>% 
+  # Disambiguate author_year
+  group_by(author_year)  %>% 
+  mutate(id_rank = match(id, unique(id))) %>%
+  mutate(author_year = ifelse(max(id_rank) > 1, 
+                               paste0(author_year, letters[id_rank]), 
+                               author_year)) %>%
+  ungroup() %>%
+  select(-id_rank)
+
+# Fix data types
+dataset <- dataset %>% bind_rows(dataset_nen %>% mutate(reliab_perf = as.character(reliab_perf))) %>% 
+  mutate(n_teams = as.numeric(n_teams), domain = domain %>% str_replace("_", "-") %>% 
+                                                           as.factor() %>% relevel(ref = "Demographic"))
+# Remove inconsistencies
+dataset$pub_status[dataset$pub_status == "MA Dissertation"] <- "Masters Dissertation"
+dataset$language[dataset$language == "Chinese"] <- "chinese"
+
+```
+
+
+## Estimate 'corrected' correlations and standard errors
+
+### Effective sample sizes
+
+Largest sample sizes associated with studies that sampled outputs produced by teams (e.g., patents, Wikipedia articles and academic publications) rather than teams. Multiple of these may be created by the same team and frequently teams will overlap. Nevertheless, they provide relevant data based on large samples, so that we wanted to include them. As there is no systematic way to estimate how many independent teams these represent, the sample sizes were windsorized to the largest sample size representing independent teams. This affected `r dataset %>% filter(n_obs == "OUTPUTS") %>% pull(id) %>% unique() %>% length()` studies.
+
+```{r}
+dataset$n_teams_coded <- dataset$n_teams
+
+other_dataset <-  dataset %>% filter(is.na(n_obs) | n_obs != "OUTPUTS") 
+max_sample <- max(other_dataset$n_teams)
+
+adj_dataset <-  dataset %>% filter(n_obs == "OUTPUTS") %>% 
+  rowwise() %>% 
+  mutate(n_teams = min(n_teams, max_sample)) %>% 
+  ungroup()
+
+dataset <- bind_rows(other_dataset, adj_dataset)
+```
+
+Many more studies relied on multiple observations of the same teams, e.g, seasons for sports-teams and years for firms. These observations are evidently dependent, so that the number of observations cannot be treated as the effective sample size. Meta-analyses in business psychology rarely address this issue explicitly, and sometimes appear to treat observations from panel data as independent - yet that can give excessive weight to studies based on a low number of independent clusters. Instead, this needs to be corrected for the auto-correlation. This is rarely reported in the papers considered, so had to be assumed based on available data.
+
+For sports teams, we identified two sources that reported year-on-year correlations, reporting r = .72 for the season-to-season win percentage in the NBA (Landis, 2001), and r = .64 for the season-to-season goal difference in the German Bundesliga (calculated based on Ben-Ner et al., 2017). Therefore, we assumed a year-on-year correlation of .7 for repeated observations of sports teams.
+
+For year-on-year company performance, we consistently identified lower correlations, specifically:
+- Return on assets (logged): .43 (Hambrick et al., 2014)
+- Return on assets (Rickley et al., 2021): .54
+Therefore, we assumed a year-on-year correlation of .5 for repeated measures of corporate and team performance.
+
+However, for specific operational measures, the correlation is likely to be substantially different and likely higher. For instance, Pegels et al (2000) report that airline's load factor had a year-on-year correlation of .96. Similarly, Zouaghi et al. (2020) measured R&D performance every year based on whether an innovative product had been introduced in the previous 3 years, which will evidently correlate strongly due to the measurement choice, regardless of underlying autocorrelation. Therefore, we only considered the number of independent observations in such cases. 
+
+After that, we calculated the effective sample size per observation using the common formula provided by the Stan Development Team [(2024)](https://mc-stan.org/docs/reference-manual/effective-sample-size.html), where N refers to the number of observations per observed team, r to the correlation between adjacent time-points and N* to the effective sample size per team.
+
+$$
+N^* = max(\frac{N}{1 + 2 \times r}, 1)
+$$
+
+
+```{r}
+other_dataset <- dataset %>% filter(is.na(n_obs) | str_detect(n_obs, "EXCL|OUTPUTS") | !team_function %in% c("Management", "Sports players"))
+
+adj_dataset <- dataset %>% filter(!is.na(n_obs), !str_detect(n_obs, "EXCL|OUTPUTS"), team_function %in% c("Management", "Sports players")) %>% 
+  mutate(scale = case_when(
+      team_function == "Management" ~ 1 / (1 + 2 * 0.5),
+      team_function == "Sports players" ~ 1 / (1 + 2 * 0.7)
+      ),
+         n_each = as.numeric(gsub("[^0-9.]+", "", n_obs)) / n_teams,
+         n_teams = n_teams * pmax(1, n_each * scale)) %>% 
+  select(-scale, -n_each)
+                  
+dataset <- bind_rows(other_dataset, adj_dataset)
+
+```
+
+
+### Correction for attenuation
+
+
+```{r}
+# Calculate r from other measures
+# Formulae taken from Polanin & Snilsveit (Campbell SR, DOI: 10.4073/cmpn.2016.3)
+
+d_to_r <- function(d, n1 = NULL, n2 = NULL, n = NULL) {
+  # If only n is provided, equal group sizes are assumed (done throughout this MA)
+  if (is.null(n1) && is.null(n2)) {n1 = n/2; n2 = n/2}
+  a <- (n1 + n2)^2 / (n1 * n2)
+  r <- d / sqrt(d^2 + a)
+  return(r)
+}
+
+OR_to_r <- function(OR, n1 = NULL, n2 = NULL, n = NULL) {
+  # If only n is provided, equal group sizes are assumed (done throughout this MA)
+  if (is.null(n1) && is.null(n2)) {n1 = n/2; n2 = n/2}
+  a <- (n1 + n2)^2 / (n1 * n2)
+  r <- (log(OR) * (sqrt(3)/pi)) / sqrt((log(OR) * (sqrt(3)/pi)) + a)
+  return(r)
+}
+
+calculate_es <- function(row) {
+  if (!is.na(row$r)) return(row$r %>% as.numeric())
+  if (!is.na(row$d)) return(d_to_r(row$d %>% as.numeric(), n = row$n_teams))
+  if (!is.na(row$other)) {
+    if (str_detect(row$other, "OR")) {
+      return(OR_to_r(str_extract(row$other, "\\d*\\.\\d+") %>% as.numeric(), n = row$n_teams))
+    } else {
+      message("Challenge in ", row$id, " row: ", row$effect_id)
+      return(NA)
+    }
+  }
+}
+
+dataset <- dataset %>% rowwise() %>% 
+  mutate(r_rep = calculate_es(pick(everything()))) %>% 
+  ungroup()
+
+# Transform special reliabilities
+# For 2-item scale, Cronbachs alpha is (2 * r) / (1 + r), so that can be directly converted
+# Other measures (IRR, CR etc) can be used as is, as they are on the same scale as alpha
+# Expect 'NAs introduced by coercion' warnings from case_when (https://github.com/tidyverse/dplyr/issues/6250)
+
+dataset <- dataset %>%
+  mutate(
+    reliab_div_reported = reliab_div,
+    reliab_perf_reported = reliab_perf,
+    across(
+      .cols = c(reliab_div, reliab_perf),
+      .fns = list(
+        type = ~case_when(
+          is.na(.) ~ NA_character_,
+          str_detect(., "^[0-9.]+$") ~ "cronbach",
+          str_detect(., "CR") ~ "comp_reliab_other",
+          str_detect(., "r =") ~ "r",
+          str_detect(., "ICC|interrater|IRR") ~ "ICC_interrater",
+          str_detect(., "[0-9]") ~ "other",
+          TRUE ~ "other"
+        ),
+        conv = ~case_when(
+          str_detect(., "^[0-9.]+$") ~ as.numeric(.),
+          str_detect(., "CR") ~ as.numeric(str_extract(., "[0-9.]+")),
+          str_detect(., "r =") ~ {
+            r_value <- as.numeric(str_extract(., "(?<=r = ?)[0-9.]+"))
+            (2 * r_value) / (1 + r_value)
+          },
+          str_detect(., "ICC|interrater|IRR") ~ as.numeric(str_extract(., "[0-9.]+")),
+          str_detect(., "[0-9]") ~ as.numeric(str_extract(., "[0-9.]+")),
+          TRUE ~ NA_real_
+        )
+      )
+    )
+  )
+
+# Bootstrap missing reliabilities
+div_scale_terciles <- quantile(dataset$items_div %>% unique() %>% setdiff(c(1, NA)), c(.33, .66), na.rm = TRUE)
+perf_scale_terciles <- quantile(dataset$items_perf %>% unique() %>% setdiff(c(1, NA)), c(.33, .66), na.rm = TRUE)
+
+dataset <- dataset %>%
+  mutate(div_tercile = cut(dataset$items_div, breaks = c(1, div_scale_terciles, Inf), labels = c(1, 2, 3), include.lowest = FALSE),
+         perf_tercile = cut(dataset$items_perf, breaks = c(1, perf_scale_terciles, Inf), labels = c(1, 2, 3), include.lowest = FALSE)
+) 
+
+div_reliabilities <-  split(dataset$reliab_div_conv, dataset$div_tercile) %>% map(na.omit)
+perf_reliabilities <- split(dataset$reliab_perf_conv, dataset$perf_tercile) %>% map(na.omit)
+
+sample_reliab <- function(x, items, type, tercile) {
+  if (!is.na(x)) return(x)
+  if (is.na(items)) {return(1)} # When both reliability and number of items are missing, no basis for adjustment
+  if (items == 1) return(1)
+  if (type == "div") {
+    return(sample(div_reliabilities[[as.character(tercile)]], 1))
+  }
+  if (type == "perf") {
+    return(sample(perf_reliabilities[[as.character(tercile)]], 1))
+  }
+  stop("Flow logic error in ", type)
+}
+
+set.seed(1347)
+
+dataset <- dataset %>% rowwise() %>% 
+  mutate(
+  reliab_div = sample_reliab(reliab_div_conv, 
+                             items_div, "div", div_tercile),
+  reliab_perf = sample_reliab(reliab_perf_conv, 
+                             items_perf, "perf", perf_tercile)
+  ) %>% ungroup() %>% 
+  mutate(r_adj = r_rep / (sqrt(reliab_div) * sqrt(reliab_div)),
+         se =  sqrt((1 - r_rep^2) / (n_teams - 2)),
+         r_scale = ifelse(r_adj == 0, 1, r_adj/r_rep),
+         var_adj = se ^ 2 * (r_scale)^2) %>% 
+  select(-r_scale)
+
+# Cap adjusted rs to +/- 1 ... more extreme values only arise in smallest samples due to sampling error,
+# and maintaining them only increases overall error (can arise when large correlations are paired with low
+# reliabilities in bootstrapping)
+
+dataset <- dataset %>% mutate(r_adj = pmin(pmax(-1, r_adj), 1))
+```
+
+(Expect warning about conversion of years due to use of case_when.)
+
+## Add moderators
+
+```{r add-moderator-data}
+if (!file.exists("data/hofstede.csv")) {
+  download.file("https://geerthofstede.com/wp-content/uploads/2016/08/6-dimensions-for-website-2015-08-16.csv", "data/hofstede.csv")
+}
+
+hofstede <- read_delim("data/hofstede.csv", delim = ";", na = "#NULL!", show_col_types = FALSE) %>% 
+  transmute(country, power_distance = pdi, collectivism = 100 - idv)
+
+# Some names in Hofstede differ
+# Data for Sri Lanka & Kazakhstan not available, so remains missing
+hofstede_map <- c(
+  "United States" = "U.S.A.", 
+  "Hong Kong SAR China" = "Hong Kong", 
+  "South Korea" = "Korea South", 
+  "United Kingdom" = "Great Britain",
+  "Cameroon" = "Africa West",  # where only regional data is available, used that
+  "United Arab Emirates" = "Arab countries",  
+  "Kuwait" = "Arab countries"
+)
+
+dataset <- dataset %>% 
+  mutate(hofstede_match = ifelse(country %in% names(hofstede_map), 
+  hofstede_map[country %>% as.character()], country %>% as.character()) %>%  factor()) %>% 
+  left_join(hofstede, by = c("hofstede_match" = "country")) %>% 
+  select(-hofstede_match)
+
+citation_counts <- bind_rows(read_excel("data/citation_data_en.xlsx") %>% distinct(),
+                             read_excel("data/citation_data_nen.xlsx") %>% distinct()) %>% 
+  mutate(citation_count = coalesce(citation_count, citations))
+                             
+
+dataset <- dataset %>% 
+  left_join(citation_counts %>% select(id = ID, citation_count), by = "id")
+
+# NAs in citation count indicate that these entries could not be found on Google Scholar - 
+# thus they have 0 Google Scholar citations.
+dataset <- dataset %>% 
+  mutate(citation_count = replace_na(citation_count, 0))
+
+if (is.list(dataset$year_coll)) {
+  dataset <- dataset %>%
+      mutate(year_coll = null_to_NA(year_coll))
+} 
+  dataset <- dataset %>%
+      mutate(year_coll_mean = ifelse(str_detect(year_coll, "–|-"),
+                                sapply(str_split(year_coll, "–|-"), 
+                                       function(x) mean(as.numeric(x))),
+                                as.numeric(year_coll)),
+             year_merged = coalesce(year_coll_mean,
+                                year))
+  
+```
+(Expect warning about conversion of years due to use of ifelse.)
+
+## Save data
+
+```{r}
+write_rds(dataset, "data/full_dataset.rds")
+```
+
+
+# Sample description
+
+Our dataset consisted of `r dataset %>% nrow()` effect sizes from `r dataset %>% distinct(articlestudy) %>% nrow()` samples in `r dataset %>% distinct(id) %>% nrow()` publications. Samples were located in `r dataset %>% distinct(country) %>% nrow()` countries. The studies were published between `r min(dataset$year)` and `r max(dataset$year)`.
+
+### Global distribution
+
+```{r fig.width=7, fig.height=10}
+source("helpers/world_map.R")
+
+teams <- dataset %>% 
+  filter(!is.na(country), !country == "Multiple") %>% 
+  mutate(country = case_when(
+    country == "United States" ~ "United States of America",
+    country == "Hong Kong SAR China" ~ "Hong Kong",
+    TRUE ~ country
+  )) %>% 
+  group_by(articlestudy, country) %>% 
+  # NB: Underestimates sample size where only sub-groups are compared -
+  # rare case, and fixing it precisely would require going back to original papers,
+  # so we accept the slight underestimation for now
+  summarise(n_teams = max(n_teams), .groups = "drop") %>% 
+  {
+    create_world_map(.$country, .$n_teams, "teams", scale_start = 10)
+  }
+
+studies <- dataset %>% 
+  filter(!is.na(country), !country == "Multiple") %>% 
+  mutate(country = case_when(
+    country == "United States" ~ "United States of America",
+    country == "Hong Kong SAR China" ~ "Hong Kong",
+    TRUE ~ country
+  )) %>% 
+  group_by(articlestudy, country) %>% 
+  summarise(studies = 1, .groups = "drop") 
+
+studies <- studies %>% ungroup() %>% mutate(region = case_when(
+  country != "Taiwan" ~ countrycode::countrycode(country, origin = "country.name", destination = "un.regionsub.name"),
+  country == "Taiwan" ~ "Eastern Asia"))
+
+studies %>% 
+  count(region) %>% 
+  mutate(region_share = n / sum(n)) %>% 
+  arrange(desc(region_share))
+  
+
+studies %>% 
+  count(country) %>% 
+  mutate(country_share = n / sum(n)) %>% 
+  arrange(desc(country_share)) %>% 
+  head(n = 10)
+  
+
+
+studies_plot <- studies %>% 
+  {
+    create_world_map(.$country, .$studies, "studies")
+  }
+
+omitted <- dataset %>% 
+  filter(is.na(country) | country == "Multiple") %>% 
+  mutate(status = ifelse(is.na(country), "unknown", "multiple")) %>% 
+  group_by(status, articlestudy) %>% 
+  summarise(n_teams = max(n_teams), n_studies = 1, .groups = "drop_last") %>% 
+  summarise(n_teams = sum(n_teams), n_studies = sum(n_studies), .groups = "drop")
+
+p <- teams / studies_plot + plot_annotation(
+  caption = glue("The maps exclude {omitted[omitted$status == 'multiple', 'n_studies']} studies ({scales::comma(round(omitted[omitted$status == 'multiple', 'n_teams'])[[1]])} teams) covering multiple countries, and {omitted[omitted$status == 'unknown', 'n_studies']} studies ({scales::comma(round(omitted[omitted$status == 'unknown', 'n_teams'])[[1]])} teams) where the country was not reported.") %>% str_wrap(60),
+  tag_levels = "A")
+          
+ggsave("figures/world_map.png", p, width = 18, units = "cm")
+ 
+p
+
+```
+
+### Distribution over time
+
+```{r fig.height=7}
+studies <- dataset %>%
+  group_by(year, domain, articlestudy) %>%
+  summarise(n = 1, .groups = "drop") %>%
+  mutate(type = "Samples")
+studies_tot <- dataset %>%
+  group_by(year, articlestudy) %>%
+  summarise(n = 1, .groups = "drop") %>%
+  mutate(type = "Samples", domain = "Total")
+effects <- dataset %>%
+  group_by(year, domain, articlestudy) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  mutate(type = "Effects")
+effects_tot <- dataset %>%
+  group_by(year, articlestudy) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  mutate(type = "Effects", domain = "Total")
+
+stud_plot <- bind_rows(studies, studies_tot) %>% 
+  ggplot(aes(x = year, y = n, fill = domain)) +
+  geom_col() +
+  facet_grid(domain ~ type, switch = "y") + 
+  labs(caption = "NB: The number of total samples does not equal the sum of domain-specific studies, as many samples encompass multiple domains." %>% str_wrap(50))
+ 
+
+eff_plot <- bind_rows(effects, effects_tot) %>% 
+  ggplot(aes(x = year, y = n, fill = domain)) +
+  geom_col() +
+  facet_grid(domain ~ type, switch = "y") +
+  labs(caption = "NB: The outlier number of Cognitive effects in 2022 is due to Qamar & Malik (2022) who assessed  personality traits across project stages (70 effect sizes)."  %>% str_wrap(50))
+
+p <- stud_plot + eff_plot & 
+  jtools::theme_apa() & 
+  theme(legend.position = "none", strip.placement = "outside", plot.caption = element_text(hjust = 0)) &
+   labs(x = "", y = "")
+
+
+ggsave("figures/timeline.png", p, width = 18, units = "cm")
+ 
+p
+```
+
+### Distribution over sub-domains
+
+```{r}
+# Code adapted from https://github.com/nilsreimer/ironic-effects-meta-analysis
+# Thanks to Nils Reimer!
+
+fig_dat <- dataset %>% 
+  group_by(domain, sub_dom, articlestudy) %>% 
+  summarise(n = 1, .groups = "drop_last") %>% 
+  summarise(tot = n(), .groups = "drop_last") %>%
+  mutate(share = tot/sum(tot), sub_dom = str_to_title(as.character(sub_dom))) %>% 
+  ungroup() %>% 
+    arrange(share) %>% 
+    filter(!is.na(sub_dom)) %>% 
+    mutate(
+      group = factor(sub_dom, levels = c("Other", sub_dom[sub_dom != "Other"] %>% unique()))
+    )
+
+fig_dat %>% group_by(domain) %>% arrange(-share) %>% slice_head(n = 3) %>% select(domain, sub_dom, share)
+
+fig_dat <- fig_dat %>% split(.$domain)
+
+create_plot <- function(data, subtitle) {
+  data %>%
+      ggplot(., aes(x = share, y = group)) +
+    labs(subtitle = subtitle) +
+      geom_col(
+        aes(fill = if_else(group == "Other", "grey82", "black")),
+        width = 0.8
+      )  +
+      geom_text(
+        aes(
+          label = tot,
+          colour = if_else(share < 0.10, "black", "white"),
+          hjust = if_else(share < 0.10, -0.25, 1.25)
+        ),
+        size = 9/.pt
+      ) +
+      scale_x_continuous(
+        labels = scales::percent_format(accuracy = 10),
+        expand = c(0, 0)
+      ) +
+      scale_colour_identity() + 
+      scale_fill_identity() +
+      theme_minimal(base_size = 10) +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(colour = "black", face = "bold"),
+        axis.text = element_text(colour = "black"),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        panel.grid.major.x = element_line(colour = "grey92")
+      )
+}
+
+dem <- create_plot(fig_dat$Demographic, "Demographic")
+cog <- create_plot(fig_dat$Cognitive, "Cognitive")
+job <- create_plot(fig_dat$`Job-related`, "Job-related")
+
+p <- dem + cog + job + 
+plot_annotation(caption = glue::glue("NB: Share missing to 100% are measures that combine sub-domains\n
+({fmt_pct(1 - sum(fig_dat$Demographic$share))} for Demographic, very rare in others.)"))
+
+ggsave("figures/sub-domains.png", p, width = 18, units = "cm")
+ 
+p
+```
+
+### Distribution over sectors & functions
+
+```{r}
+ind_sector <- dataset %>%
+  select(articlestudy, ind_sector, stud_sample, setting) %>%
+  distinct() %>%
+  mutate(ind_sector = fct_lump_n(ind_sector, 10) %>% fct_recode("Mixed" = "Multiple/mixed")) %>%
+  count(ind_sector, sort = TRUE)
+
+df <- ind_sector %>%
+  filter(!is.na(ind_sector)) %>%
+  rename(group = ind_sector, tot = n) %>%
+  mutate(share = tot / sum(tot) * 100, group = fct_inorder(group) %>% fct_rev()) %>%
+  rename(sector = group, percentage = share)
+
+# Calculate a truncated percentage for plotting
+df$truncated_percentage <- ifelse(df$percentage > 25, 25, df$percentage)
+df$truncated <- df$percentage > 25
+
+# Plot with axis break
+p_sec <- df %>%
+  ggplot(aes(y = sector, x = truncated_percentage, fill = if_else(sector == "Other", "grey82", "black"))) +
+  geom_bar(stat = "identity", width = 0.8) +
+  scale_x_continuous(
+    limits = c(0, 29.9), expand = c(0, 0), breaks = seq(0, 24, 5),
+    labels = scales::percent_format(accuracy = 1, scale = 1)
+  ) +
+  scale_fill_identity() +
+  scale_colour_identity() +
+  theme_minimal(base_size = 10) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(colour = "black", face = "bold"),
+    axis.text = element_text(colour = "black"),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    panel.grid.major.x = element_line(colour = "grey92")
+  ) +
+  geom_segment(
+    data = subset(df, percentage > 25),
+    aes(y = sector, yend = sector, xend = 25, x = 24.2),
+    arrow = arrow(type = "closed", length = unit(0.09, "inches")),
+    inherit.aes = FALSE, color = "darkred", linewidth = 1.5
+  ) +
+  geom_text(
+    data = subset(df, truncated),
+    aes(x = 27.7, label = paste0(round(percentage), "%")),
+    vjust = .3, color = "darkred", size = 9 / .pt
+  ) +
+  geom_text(
+    aes(
+      label = tot,
+      colour = if_else(percentage < 10, "black", "white"),
+      hjust = if_else(truncated_percentage == 25, 3, if_else(truncated_percentage < 10, -0.5, 1.75))
+    ),
+    size = 9 / .pt
+  ) +
+  labs(subtitle = "Studies per industry sector") + 
+  annotate("segment", x = c(21.5, 21.85), xend = c(22.5, 22.85), y = 9.5, yend = 10.5, colour = "darkred")
+
+team_function <- dataset %>%
+  select(articlestudy, team_function, stud_sample, setting, tmt) %>%
+  distinct() %>%
+  mutate(team_function = fct_lump_n(team_function, 10)) 
+
+print(glue::glue("Out of the management teams, {fmt_pct(team_function %>% filter(team_function == 'Management') %>% count(tmt) %>% mutate(share = n/sum(n)) %>% filter(tmt == 'yes') %>% pull(share))} were top management teams."))
+
+team_function <- team_function %>%
+  count(team_function, sort = TRUE)
+
+df <- team_function %>%
+  filter(!is.na(team_function)) %>%
+  rename(group = team_function, tot = n) %>%
+  mutate(share = tot / sum(tot) * 100, group = fct_inorder(group) %>% fct_rev()) %>%
+  rename(percentage = share)
+
+# Calculate a truncated percentage for plotting
+df$truncated_percentage <- ifelse(df$percentage > 25, 25, df$percentage)
+df$truncated <- df$percentage > 25
+
+# Plot with axis break
+p_fun <- df %>%
+  ggplot(aes(y = group, x = truncated_percentage, fill = if_else(group == "Other", "grey82", "black"))) +
+  geom_bar(stat = "identity", width = 0.8) +
+  scale_x_continuous(
+    limits = c(0, 29.9), expand = c(0, 0), breaks = seq(0, 24, 5),
+    labels = scales::percent_format(accuracy = 1, scale = 1)
+  ) +
+  scale_fill_identity() +
+  scale_colour_identity() +
+  theme_minimal(base_size = 10) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(colour = "black", face = "bold"),
+    axis.text = element_text(colour = "black"),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    panel.grid.major.x = element_line(colour = "grey92")
+  ) +
+  geom_segment(
+    data = subset(df, percentage > 25),
+    aes(y = group, yend = group, xend = 25, x = 24.2),
+    arrow = arrow(type = "closed", length = unit(0.09, "inches")),
+    inherit.aes = FALSE, color = "darkred", linewidth = 1.5
+  ) +
+  geom_text(
+    data = subset(df, truncated),
+    aes(x = 27.7, label = paste0(round(percentage), "%")),
+    vjust = .3, color = "darkred", size = 9 / .pt
+  ) +
+  geom_text(
+    aes(
+      label = tot,
+      colour = if_else(truncated_percentage < 10, "black", "white"),
+      hjust = if_else(truncated_percentage == 25, 3, if_else(truncated_percentage < 10, -0.5, 1.75))
+    ),
+    size = 9 / .pt
+  ) +
+  labs(subtitle = "Studies per function") + 
+  annotate("segment", x = c(21.5, 21.85), xend = c(22.5, 22.85), y = 9.5, yend = 10.5, colour = "darkred")
+
+
+
+p <- p_sec + p_fun + plot_annotation(caption = glue::glue("NB: Share missing to 100% are missing values,\nlargely from business simulations and experiments\n({fmt_pct(dataset %>% select(articlestudy, team_function) %>% 
+  distinct() %>% summarise(mean(is.na(ind_sector))) %>% pull())} for sectors & {fmt_pct(dataset %>% select(articlestudy, team_function) %>% 
+  distinct() %>% summarise(mean(is.na(team_function))) %>% pull())} for functions)."))
+
+ggsave("figures/functions_and_sectors.png", p, width = 18, height = 12, units = "cm")
+
+p
+```
+
+### Distribution over moderators
+
+Some of the registered moderators could not be coded meaningfully. In particular, diversity climate and psychological safety were rarely reports  (< 5%) - and if so, then always as positive. Therefore, they are omitted from the reporting.
+
+```{r}
+
+variables <- c("art_focus", "pub_status", "interdep", "complexity", "longevity", "tmt", "stud_sample",
+               "meas_type", "design", "rater", "virtuality", "auth_diff", "language")
+
+var_names <-  tibble::tribble(
+  ~old,           ~new,
+   "art_focus",    "Article focus",   
+   "pub_status",   "Publication status",  
+   "language",      "Language",      
+   "design",       "Design",      
+   "tmt",          "TMT",         
+   "stud_sample",  "Student sample", 
+   "meas_type",    "Diversity measure",   
+   "rater",        "Performance rater",       
+   "interdep",     "Interdependence",    
+   "complexity",   "Complexity",  
+   "virtuality",   "Virtuality",  
+   "longevity",    "Longevity",
+   "auth_diff",    "Authority Differentiation",   
+   "collectivism",  "Collectivism",   
+   "power_distance",    "Power distance",   
+   "year_merged",    "Year of data collection"   
+)
+
+level_names <- tibble::tribble(
+  ~var,           ~level_old,                 ~level_new,                 
+   "art_focus",    "focal H",                  "Focal hypothesis",                 
+   "art_focus",    "auxiliary H",              "Auxiliary hypothesis",             
+   "art_focus",    "descriptive",              "Descriptive",             
+   "pub_status",   "Published",                "Published",               
+   "pub_status",   "Masters Dissertation",          "Masters Dissertation",         
+   "pub_status",   "Working paper/Preprint",   "Working Paper/Preprint",  
+   "pub_status",   "Conference presentation",  "Conference Presentation", 
+   "pub_status",   "PhD Dissertation",         "PhD Dissertation",        
+   "interdep",     "high",                     "High",                    
+   "interdep",     "medium",                   "Medium",                  
+   "interdep",     "low",                      "Low",                     
+   "complexity",   "high",                     "High",                    
+   "complexity",   "medium",                   "Medium",                  
+   "complexity",   "low",                      "Low",                     
+   "tmt",          "yes",                      "Yes",                     
+   "tmt",          "no",                       "No",                      
+   "stud_sample",  "yes",                      "Yes",                     
+   "stud_sample",  "no",                       "No",                      
+   "meas_type",    "Variety",                  "Variety",                 
+   "meas_type",    "Separation",               "Separation",              
+   "meas_type",    "Other",                    "Other",                   
+   "design",       "Experimental",             "Experimental",            
+   "design",       "Observational",            "Observational",           
+   "rater",        "Objective",                "Objective",               
+   "rater",        "Subjective - self",        "Subjective - Self",       
+   "rater",        "Subjective - supervisor",  "Subjective - Supervisor", 
+   "rater",        "Subjective - external",    "Subjective - External",   
+   "virtuality",   "physical",                 "Physical",                
+   "virtuality",   "hybrid-members",           "Hybrid-Members",          
+   "virtuality",   "virtual",                  "Virtual",                 
+   "auth_diff",    "high",                     "High",                    
+   "auth_diff",    "mixed",                    "Mixed",                   
+   "auth_diff",    "low",                      "Low",
+   "language",  "chinese",     "Chinese",    
+   "language",  "dutch",       "Dutch",      
+   "language",  "english",     "English",    
+   "language",  "french",      "French",     
+   "language",  "german",      "German",     
+   "language",  "indonesian",  "Indonesian", 
+   "language",  "italian",     "Italian",    
+   "language",  "japanese",    "Japanese",   
+   "language",  "korean",      "Korean",     
+   "language",  "portuguese",  "Portuguese", 
+   "language",  "spanish",     "Spanish",
+   "longevity",  "hours",    "Hours",   
+   "longevity",  "days",     "Days",    
+   "longevity",  "weeks",    "Weeks",   
+   "longevity",  "months",   "Months",  
+   "longevity",  "years",    "Years",
+   "longevity",  "stable",   "Stable"  
+)
+
+
+summarize_cat_variable <- function(dataset, variable) {
+    # Domain-specific summary
+    domain_summary <- dataset %>%
+        select(articlestudy, all_of(variable), domain) %>%
+        distinct() %>%
+      rename(level = !!sym(variable)) %>% 
+        group_by(domain, level) %>%
+        summarise(count = n(), .groups = 'drop_last') %>%
+        mutate(share = count / sum(count), variable = variable)
+
+    # Total summary
+    total_summary <- dataset %>%
+        select(articlestudy, all_of(variable)) %>%
+        distinct() %>%
+            rename(level = !!sym(variable)) %>% 
+
+        group_by(level) %>%
+        summarise(count = n(), .groups = 'drop') %>%
+        mutate(share = count / sum(count), domain = "Total", variable = variable)
+
+    # Combine domain-specific and total summaries
+    summary <- bind_rows(domain_summary, total_summary)
+    
+    # Pivot wider and format the count and share
+    summary %>%
+        mutate(count_share =  paste0(count, " (", scales::percent(share, accuracy = .1), ")")) %>%
+        select(-count, -share) %>%
+        tidyr::pivot_wider(names_from = domain, values_from = count_share, values_fill = "0") %>%
+        select(variable, level, everything()) %>% 
+      left_join(total_summary %>% select(variable, level, total_count = count), by = c("variable", "level"))
+}
+
+# Function to rename and reorder variables and levels
+apply_var_and_level_names <- function(result_table, var_names, level_names) {
+
+  # Order
+  result_table <- result_table %>%
+    arrange(match(variable, var_names$old),
+            match(paste(variable, level), paste(level_names$var, level_names$level_old)))
+  
+    # Renaming levels
+    result_table <- result_table %>%
+        left_join(level_names, by = c("variable" = "var", "level" = "level_old")) %>%
+        mutate(level = ifelse(is.na(level_new), level, level_new)) %>%
+        select(-level_new)
+
+        # Renaming variables
+    result_table <- result_table %>%
+        left_join(var_names, by = c("variable" = "old")) %>%
+        mutate(variable = ifelse(is.na(new), variable, new)) %>%
+        select(-new)
+
+    result_table
+}
+
+result_table <- purrr::map_dfr(variables, ~summarize_cat_variable(dataset, .x))
+
+# Apply renaming and reordering
+final_table <- apply_var_and_level_names(result_table, var_names, level_names)
+
+final_table %>% 
+  gt(groupname_col = "variable", rowname_col = "level") %>%
+  tab_stubhead(label = "Variable") %>%
+  cols_label(total_count = "") %>% 
+  tab_spanner("Diversity domain", Demographic:`Job-related`) %>% 
+  sub_missing(columns = everything(), missing_text = "(missing)") %>% 
+  gt_apa_style() %>% tab_style(
+        style = list(cell_text(weight = "bold")),
+        locations = cells_row_groups()
+    ) %>% 
+      tab_style(
+        style = cell_text(align = "left", indent = px(15)),
+        locations = cells_stub()
+    ) %>% 
+  tab_header("Distribution of effect sizes across moderator variables") %>% 
+    gt_plt_bar(column = total_count, keep_column = FALSE, color = "grey")
+```
+
+

@@ -1,0 +1,602 @@
+---
+title: "Diversity and team-performance meta-analysis: Robustness checks"
+description: null
+output:
+  html_document:
+    theme: united
+    toc: yes
+    toc_float: true
+    code_folding: hide
+  pdf_document:
+    fig_height: 6
+    fig_width: 8
+  word_document: default
+Author: Lukas Wallrich 
+---
+
+
+```{r setup, include=FALSE}
+if (!require(groundhog)) install.packages('groundhog')
+groundhog::groundhog.library(c("readxl", "metafor", "tidyverse", "clubSandwich", "cli", "rsprite2", "esc",
+                              "gt", "gtExtras", "psych", "furrr", "progressr", "ggtext"), date = "2023-07-09")
+
+# Need more recent version of patchwork due to faceting bug
+groundhog::groundhog.library(c("patchwork"), date = "2023-07-09")
+
+groundhog::groundhog.library(c("lukaswallrich/timesaveR"), date = "2023-07-09")
+
+source("helpers/helpers.R")
+source("helpers/equivalence_testing.R")
+source("helpers/source_rmd_chunks.R") # function to source code chunks from other Rmd files - used to include moderator test code here
+
+source_rmd_chunks("3_moderators.Rmd", "univariate-functions")
+dataset <- read_rds("data/full_dataset.rds")
+rho <- .6
+```
+
+# Check for retractions
+
+```{r message=FALSE}
+# Updated last on 10 Feb 24
+if (FALSE) {
+  download.file("https://api.labs.crossref.org/data/retractionwatch?l.wallrich@bbk.ac.uk", "data/retractions.csv")
+}
+
+retracted <- read_csv("data/retractions.csv")
+
+googlesheets4::gs4_deauth()
+
+refs_en <- googlesheets4::read_sheet("https://docs.google.com/spreadsheets/d/1pEYZUZvFr8qmULT077y932BUShpJvhs-asRuyyiBKlQ/edit#gid=1628922200", 
+                                             sheet = "Refs",
+                                             skip = 5)
+
+refs_n_en <- googlesheets4::read_sheet("https://docs.google.com/spreadsheets/d/1XCjlC3u7Ws2KCjaRQ1R0VuU0mLQ5mHVipmzuGtivLCs/edit#gid=1553069535", 
+                                             sheet = "Refs",
+                                             skip = 1)
+
+# Check whether references match final sample
+if (length(setdiff(dataset$id, c(refs_en$ID, refs_n_en$ID)))>0) {
+  print(paste0("Missing references: ", glue::glue_collapse(setdiff(dataset$id, c(refs_en$ID, refs_n_en$ID)), ", ")))
+}
+if (length(setdiff(c(refs_en$ID, refs_n_en$ID), dataset$id))>0) {
+  print(paste0("Excess references: ", glue::glue_collapse(setdiff(c(refs_en$ID, refs_n_en$ID), dataset$id), ", ")))
+}
+
+if (length(intersect(refs_en$DOI %>% str_to_lower() %>% str_trim(), retracted$OriginalPaperDOI %>% str_to_lower() %>% str_trim()) %>% na.omit()) > 0) {
+  print("Retracted articles in English sample:", 
+        intersect(refs_en$DOI %>% str_to_lower() %>% str_trim(), retracted$OriginalPaperDOI %>% str_to_lower() %>% str_trim()) %>% na.omit() %>% 
+          paste(collapse = ", "))
+}
+
+if (length(intersect(refs_n_en$DOI %>% str_to_lower() %>% str_trim(), retracted$OriginalPaperDOI %>% str_to_lower() %>% str_trim()) %>% na.omit()) > 0) {
+  print("Retracted articles in non-English sample:", 
+        intersect(refs_n_en$DOI %>% str_to_lower() %>% str_trim(), retracted$OriginalPaperDOI %>% str_to_lower() %>% str_trim()) %>% na.omit() %>% 
+          paste(collapse = ", "))
+}
+```
+
+None of the included articles were retracted as per Retraction Watch's database, as [available from Crossref](https://api.labs.crossref.org/data/retractionwatch?l.wallrich@bbk.ac.uk) on 10 February 2024.
+
+
+# Stat checks
+
+## Identification of sources with potential reporting issues
+
+### GRIM and GRIMMER
+
+For this, relevant means and standard deviations were extracted from the reports during the coding - the following code is used to analyse those. Afterwards, the two cases for concern were reviewed manually.
+
+```{r warning=FALSE}
+
+# Means are imported as character so that trailing 0s can be accounted for - therefore,
+# we use this wrapper function to convert to numeric and account for trailing 0s
+
+GRIM_test_wrapper <- function(mean_char, n_obs, n_items = 1, return_values = FALSE) {
+  # Convert mean from character to numeric
+  mean_num <- as.numeric(mean_char)
+  
+  # Determine the precision of the mean based on the input string
+  decimal_position <- regexpr("\\.", mean_char)
+  if (decimal_position == -1) {
+    m_prec <- 0
+  } else {
+    m_prec <- nchar(substring(mean_char, decimal_position + 1))
+  }
+  
+  # Call the original GRIM_test function with calculated precision
+  GRIM_test(mean = mean_num, n_obs = n_obs, m_prec = m_prec, n_items = n_items, return_values = return_values)
+}
+
+GRIMMER_test_wrapper <- function(mean_char, sd_char, n_obs, n_items = 1) {
+  # Convert mean from character to numeric
+  mean_num <- as.numeric(mean_char)
+  sd_num <- as.numeric(sd_char)
+  
+  # Determine the precision of the mean based on the input string
+  decimal_position <- regexpr("\\.", mean_char)
+  if (decimal_position == -1) {
+    m_prec <- 0
+  } else {
+    m_prec <- nchar(substring(mean_char, decimal_position + 1))
+  }
+  decimal_position <- regexpr("\\.", sd_char)
+  if (decimal_position == -1) {
+    sd_prec <- 0
+  } else {
+    sd_prec <- nchar(substring(sd_char, decimal_position + 1))
+  }
+  
+  # Call the original GRIM_test function with calculated precision
+  GRIMMER_test(mean = mean_num, sd = sd_num, n_obs = n_obs, m_prec = m_prec, sd_prec = sd_prec, n_items = n_items)
+}
+
+GRIM_div_concerns <- dataset %>% filter(!is.na(m_div)) %>% 
+  mutate(N = ifelse(!is.na(notes_div) & str_detect(notes_div, "N = "), str_extract(notes_div, "\\d+") %>% as.numeric(), n_teams_coded)) %>% 
+  rowwise() %>% 
+  mutate(GRIM = GRIM_test_wrapper(m_div, N, n_items = items_div, return_values = FALSE),
+         GRIMMER = GRIMMER_test_wrapper(m_div, sd_div, N, items_div)) %>% 
+  filter(!GRIMMER)
+
+GRIM_perf_concerns <- dataset %>% filter(!is.na(m_perf)) %>% 
+  mutate(N = ifelse(!is.na(notes_perf) & str_detect(notes_perf, "N = "), str_extract(notes_perf, "\\d+") %>% as.numeric(), n_teams_coded)) %>% 
+  rowwise() %>% 
+  mutate(GRIM = GRIM_test_wrapper(m_perf, N, n_items = items_perf, return_values = FALSE),
+         GRIMMER = GRIMMER_test_wrapper(m_perf, sd_perf, N, items_perf)) %>% 
+  filter(!GRIMMER)
+
+GRIM_div_concerns %>% transmute(id, measure = paste(domain, sub_dom, div_specific), M = m_div, N, items = items_div, GRIM) %>% 
+  bind_rows(GRIM_perf_concerns %>% transmute(id, measure = paste(name_perf, rater), M = m_perf, N, items = items_perf, GRIM)) %>% 
+  ungroup()
+
+GRIM_flagged_reviewed <- c("10.1348/096317905x72128", "10.1111/joop.12303")
+```
+
+Investigation of these concerns shows that these studies reported means inconsistent with our understanding of sample size and scale length. Therefore, they were included in the robustness check.
+
+- 10.1108/jmp-01-2012-0020: Reports impossible mean (2.47) for functional diversity *if* this was based on the full sample (N = 48). It could be limited to the sample where manager ratings are available (N = 36), but that is not indicated in the reporting.
+- 10.1111/joop.12303: Performance ratings inconsistent with *our interpretation* of the measure as a single-item. Likely then consisted of three items, but that is not clearly indicated, and no reliability is reported.
+
+### Statcheck
+
+```{r}
+
+extract_pdfminer <- function(path) {
+  # Import Python module
+  pdfminer <- import("pdfminer.high_level")
+  
+  # Call Python function to extract text
+  text <- pdfminer$extract_text(path)
+  
+  # Return the extracted text
+  return(text)
+}
+
+# Retrieve relevant FTs
+full_texts <- list.files("../SM1 - Search and deduplication/full_text/included/", full.names = TRUE, recursive = TRUE, pattern = ".pdf")
+
+pdfs <- refs_en %>% select(ID, file_name = `File-name`) %>% bind_rows(
+  refs_n_en %>% select(ID, file_name = `File-name`) 
+) %>% 
+  rename(id = ID)
+
+pdfs$path <- full_texts[map_int(pdfs$file_name, \(f) str_detect(full_texts, fixed(f)) %>% which() %>% c(NA) %>% .[1])]
+
+# Two PDFs missing - here authors of conference papers provided brief excerpts only
+# pdfs %>% filter(is.na(path)) %>% left_join(dataset %>% select(id, file), by = "id", multiple = "first") 
+
+run_statcheck <- function(file_path, pdf_engine = c("default", "pdftools", "all"), ocr_failures = TRUE, suppress_ocrmypdf = FALSE) {
+  if(!file.exists(file_path)) {
+    warning("File does not exist: ", file_path)
+    return(NA)
+  }
+  
+  statcheck_result <- list()
+  
+  if (pdf_engine[1] %in% c("pdftools", "all")) {
+  pdf_text <- pdftools::pdf_text(file_path) %>% 
+              paste(collapse = "") %>% 
+              str_squish() %>%
+    str_remove_all('-(?=\\s*\\d)') # remove space between - and a number
+  
+  statcheck_result["pdftools"] <- list(possibly(statcheck::statcheck, otherwise = NULL)(pdf_text, pZeroError = FALSE, OneTailedTxt = TRUE, messages = FALSE))
+
+  } 
+  
+  if (pdf_engine[1] %in% c("default", "all")) {
+    statcheck_result["default"] <- list(possibly(statcheck::checkPDF, otherwise = NULL)(file_path, pZeroError = FALSE, OneTailedTxt = TRUE, messages = FALSE))
+  }
+  
+  if ((is.null(statcheck_result) && ocr_failures == TRUE)|| pdf_engine[1] %in% c("all")) {
+    #message("Attempting OCR ...")
+    if (suppress_ocrmypdf == TRUE) {
+if (.Platform$OS.type == "windows") {
+  redirect <- " >NUL 2>&1"
+} else {
+  redirect <- " >/dev/null 2>&1"
+}
+    } else {
+      redirect <- ""
+    }
+    
+    temp <- tempfile(fileext = ".pdf")
+    system(sprintf('ocrmypdf --force-ocr --quiet %s %s %s', 
+                   shQuote(file_path),
+                   shQuote(temp),
+                   redirect))
+    statcheck_result["ocr"] <- list(possibly(statcheck::checkPDF, otherwise = NULL)(temp, pZeroError = FALSE, OneTailedTxt = TRUE, messages = FALSE))
+
+    if(!is.null(statcheck_result[["ocr"]])) {
+      #message("OCR improved ", basename(file_path))
+    } else {
+      #message("OCR did not change ", basename(file_path))
+    }
+  }
+  
+  if (is.null(statcheck_result)) {
+    return(NA)
+  } else {
+    return(statcheck_result)
+  }
+}
+
+if (!file.exists("data/statcheck_results_merged.qs")) {
+  message("Statcheck will now be run in background job. Run this chunk again once the job is finished to retrieve the results.")
+
+# Run as background job
+# Does not return data, but saves it to disk
+job::job({
+plan(multisession, workers = 4)
+with_progress({
+  p <- progressor(steps = nrow(pdfs))
+  
+  # Create a directory for the intermittent results if it doesn't exist
+  results_dir <- "data/statcheck_results"
+  if (!dir.exists(results_dir)) dir.create(results_dir)
+  
+  future_walk2(pdfs$path, pdfs$file_name, \(f, id) {
+    result_file <- file.path(results_dir, paste0(id, ".rds"))
+    # Check if the result for this file already exists to skip processing
+    if (!file.exists(result_file)) {
+      result <- possibly(run_statcheck, otherwise = NULL)(f, pdf_engine = "all", suppress_ocrmypdf = FALSE)
+      if (is.null(result)) {
+        browser() # Should never be reached
+      }
+      # Save the result to disk
+      saveRDS(result, result_file)
+      t <- try(readRDS(result_file))
+if(class(t) == "try-error") {
+    browser() # Should never be reached
+}
+    }
+    p() # Update progress
+    #result
+  })
+statcheck_results <- map2(pdfs$id, pdfs$file_name, \(id, f) {
+    dat <- possibly(read_rds, otherwise = tibble(status = "RDS failed", id = id))(file.path(results_dir, paste0(f, ".rds"))) 
+    if (!is_tibble(dat)) {
+     
+  dat <- dat %>% 
+    map_dfr(\(x) if(is.null(x)) {
+      tibble(status = "failed")
+    }  else if (length(x) == 1 && is.na(x)) {
+              tibble(status = "no results found")
+      } else if (!(is.data.frame(x))) {
+        tibble(status = "invalid file type") # should never get here
+      } else {
+        x %>% mutate(status = "succeeded")
+        }, .id = "method") %>% 
+    mutate(id = id)
+    }
+    dat %>%     mutate(id = as.character(id))
+}
+
+    ) %>% bind_rows() 
+  qs::qsave(statcheck_results, "data/statcheck_results_merged.qs")
+
+})},
+title = "Run statcheck with multiple extraction options"
+)
+
+} else {
+  # Read the results from disk
+  statcheck_results <- qs::qread("data/statcheck_results_merged.qs")
+}
+
+n_failures <- statcheck_results %>% 
+  group_by(method, status, id) %>% 
+  summarise(n_res = ifelse(status[1] == "succeeded", n(), 0), .groups = "drop_last") %>%
+  filter(status == "RDS failed") %>% pull(id) %>% length()
+```
+
+`r n_failures` PDFs could not be parsed by statcheck. As there was no evidence for misreporting in these cases, we *included* them in the robustness check.
+
+```{r}
+
+# statcheck_results %>% 
+#   group_by(method, status, id) %>% 
+#   summarise(n_res = ifelse(status[1] == "succeeded", n(), 0), .groups = "drop_last") %>%
+#   filter(status == "RDS failed") %>% select(id) %>% gt::tab_header("Studies that could not be parsed by statcheck")
+
+# statcheck_results %>% 
+#   group_by(method, status, id) %>% 
+#   summarise(n_res = ifelse(status[1] == "succeeded", n(), 0), .groups = "drop_last") %>%
+#   summarise(n = n(), mean_res = mean(n_res), median_res = median(n_res), .groups = "drop") %>% 
+#   filter(status == "succeeded") %>% 
+#   mutate(success_rate = n / nrow(pdfs))
+  
+statcheck_merged <- statcheck_results %>%
+  filter(status == "succeeded") %>%
+  select(-source, -status, -apa_factor) %>%
+  distinct() %>%
+  mutate(value = TRUE) %>%
+  pivot_wider(names_from = method, values_from = value, values_fill = FALSE) %>%
+  group_by(across(-c(pdftools:default))) %>%
+  summarise(across(pdftools:default, any), .groups = 'drop')
+ 
+# # Before reporting properly on parsing methods, would need to improve merging (e.g., with spaces or different dashes)
+# statcheck_merged %>% count(across(pdftools:default)) %>% 
+#   mutate(hits = pdftools + ocr + default) %>% arrange(-hits) %>% 
+#   select(hits, everything())
+```
+
+#### Statcheck 'decision errors'
+
+In these cases, the re-calculated *p*-value is on the other side of the significance threshold.
+
+```{r}
+statcheck_merged %>% filter(decision_error) %>% DT::datatable(options = list(pageLength = 5))
+
+```
+
+We manually reviewed the "errors" flagged by statcheck and identified some as OK (usually due to parsing errors were *t*-tests were read and assessed as chi-squared. The others were excluded in the robustness check. The numbers that are not DOIs here refer to our internal references, usually for dissertations and theses - the specific reports can be identified in the data.
+
+Result of reviewing *decision errors*
+
+- 10.1037/1089-2699.5.2.111: x(3, N = 321) = 63.44, p >.1 *inconsistent*
+- 10.1080/00140139.2013.875597: parse errors, Chi2 should be t, BUT flagged F tests inconsistent with ps 
+- 10.1109/tem.2011.2166078: flagged chi-sq plus the third reported all appear inconsistent
+- OK: 10.1177/00187208211048301: one-tailed test, reported but too far for statcheck to catch automatically
+- 10.1177/1368430212437798: Sobel's test using z, so possibly some flexibility - but can't see how that p-value could be achieved (and 5 other reporting errors without decision errors)
+- 10.1287/orsc.2013.0878: maybe have used one-tailed tests for Sobel's test without reporting that - inconsistent as it stands (and again for test interpreted as showing marginal significance)
+- OK: 10.1287/orsc.2021.1448: parse error, Chi2 should be t, then consistent
+- OK: 10.1287/orsc.2021.1560: parse error, Chi2 should be t, then consistent
+- 21073: flagged F-test inconsistent - as is a previous one claimed to be significant at 10% level
+- 38862: inconsistent F-tests
+- OK: bw_15842: parse error, Chi2 should be t, then consistent
+
+
+#### Other Statcheck 'errors'
+
+In these cases, the re-calculated *p*-value differs from the reported *p*-value, but both are on the same side of .05
+
+```{r}
+statcheck_merged %>% filter(error, !decision_error) %>% mutate(computed_p = round(computed_p, 3)) %>% DT::datatable(options = list(pageLength = 5))
+
+statcheck_flagged_reviewed <- c("10.1037/1089-2699.5.2.111", "10.1080/00140139.2013.875597", "10.1109/tem.2011.2166078", "10.1177/1368430212437798", "10.1287/orsc.2013.0878", "21073", "38862", "10.1002/hrm.21658", "10.1002/job.1777", "10.1016/j.jbusres.2018.11.029", "10.1016/j.obhdp.2013.04.003", "10.1037/1089-2699.12.4.307", "10.1037/a0025583", "10.1109/ieem.2013.6962412", "10.1177/1046496418796281", "10.1348/096317905x72128", "10.2139/ssrn.2929009", "31242", "34459", "41373", "9990")
+```
+
+
+
+Result of reviewing *other errors that did not affect statistical significance:*
+
+- 10.1002/hrm.21658	- inconsistent, conservative
+- 10.1002/job.1777	- inconsistent, conservative
+- 10.1016/j.jbusres.2018.11.029	- inconsistent, conservative
+- 10.1016/j.obhdp.2013.04.003	- inconsistent
+- 10.1037/1089-2699.12.4.307	- inconsistent
+- 10.1037/a0025583	- inconsistent
+- OK 10.1097/HMR.0000000000000369 - p reported as < .00, which is impossible, but p is indeed tiny, so accepted
+- 10.1109/ieem.2013.6962412 - appears to have used one-tailed p-values without reporting that
+- OK 10.1109/ieem.2014.7058744	- parsing error because , instead of . was used for decimals
+- 10.1177/1046496418796281: inconsistent, conservative
+- 10.1348/096317905x72128	- inconsistent, very minor (and again many instances of p < .00 that would be ok on their own)
+- 10.2139/ssrn.2929009	- inconsistent, wrong band (i.e. not < .01)
+- 31242 - inconsistent, conservative
+- OK 33800, issue is only < .00 (plus one , vs . parsing error)
+- 34459 - inconsistent, though only = .001 instead of < .001
+- 41373 - inconsistent, though only < .004 instead of = .004
+- 9990 - inconsistent, minor
+
+Even though some of these deviations are very small, we considered them as potentially indicating a lack of accuracy in reporting, and thus excluded all reports with any inconsistencies in the robustness check.
+
+## Meta-analysis excluding sources potentially affected by reporting errors
+
+```{r message=FALSE}
+run_main_meta <- function(dataset) {
+  
+V <- with(
+  dataset,
+  impute_covariance_matrix(
+    vi = var_adj,
+    cluster = articlestudy,
+    r = rho
+  )
+)
+
+meta_model_intercept <- rma.mv(r_adj ~ 1,
+  V = V,
+  random = ~ 1 | articlestudy / effect_id,
+  data = dataset,
+  test = "t",
+  dfs = "contain",
+  sparse = TRUE
+)
+
+meta_model <- rma.mv(r_adj ~ 1,
+  V = V,
+  random = ~ 1 | articlestudy / effect_id,
+  data = dataset,
+  test = "t",
+  dfs = "contain",
+  sparse = TRUE
+)
+
+meta_model_intercept_dom <- rma.mv(r_adj ~ 1 + domain,
+  V = V,
+  random = ~ 1 | articlestudy / effect_id,
+  data = dataset,
+  test = "t",
+  dfs = "contain",
+  sparse = TRUE
+)
+
+meta_model_dom <- rma.mv(r_adj ~ 0 + domain,
+  V = V,
+  random = ~ 1 | articlestudy / effect_id,
+  data = dataset,
+  test = "t",
+  dfs = "contain",
+  sparse = TRUE
+)
+
+confidence_intervals <- conf_int(meta_model_intercept, vcov = "CR2", p_values = TRUE) %>%
+  mutate(
+    `equiv_.1` = get_p_value(meta_model_intercept, "intrcpt", sesoi = .1),
+    `equiv_.05` = get_p_value(meta_model_intercept, "intrcpt", sesoi = .05),
+    cred_upper = beta + 1.282 * sqrt(sum(meta_model_intercept$sigma2) + SE^2),
+    cred_lower = beta - 1.282 * sqrt(sum(meta_model_intercept$sigma2) + SE^2),
+    Coef = "Overall"
+  ) %>%
+  bind_rows(conf_int(meta_model_dom, vcov = "CR2", p_values = TRUE) %>%
+    rowwise() %>%
+    mutate(
+      `equiv_.1` = get_p_value(meta_model_dom, Coef, sesoi = .1),
+      `equiv_.05` = get_p_value(meta_model_dom, Coef, sesoi = .05)
+    ) %>%
+    ungroup() %>%
+    mutate(
+      cred_upper = beta + 1.282 * sqrt(sum(meta_model_dom$sigma2) + SE^2),
+      cred_lower = beta - 1.282 * sqrt(sum(meta_model_dom$sigma2) + SE^2)
+    )) %>%
+  as_tibble()
+
+ks <- dataset %>%
+  count(Domain = domain) %>%
+  bind_rows(summarise(., n = sum(n), Domain = "Overall")) %>%
+  rename(`*k*` = n)
+
+confidence_intervals %>%
+  mutate(
+    Domain = Coef %>% str_remove("domain") %>% str_replace("_", "-"),
+    `*r*` = paste(fmt_cor(beta, 3), fmt_ci(CI_L, CI_U, 3), sigstars(p_val)) %>% str_replace_all("&dagger;", "†"),
+    `|*r*| < .1` = fmt_p(`equiv_.1`, equal_sign = FALSE),
+    `|*r*| < .05` = fmt_p(`equiv_.05`, equal_sign = FALSE),
+    `Credibility\ninterval` = fmt_ci(cred_lower, cred_upper, 3)
+  ) %>%
+  select((ncol(.) - 4):ncol(.)) %>%
+  left_join(ks, by = "Domain") %>%
+  select(Domain, `*k*`, everything()) %>%
+  gt() %>%
+  tab_spanner(md("Equivalence tests (*p*)"), `|*r*| < .1`:`|*r*| < .05`) %>%
+  fmt_labels_md() %>%
+  tab_source_note(md(paste0("\\", timesaveR:::.make_stars_note(timesaveR:::std_stars[-1])))) %>%
+  gt_apa_style()
+}
+
+dataset_robust <- dataset %>% filter(!id %in% c(statcheck_flagged_reviewed, GRIM_flagged_reviewed))
+run_main_meta(dataset_robust) %>% 
+  tab_header("Meta-analysis results excluding sources with possible errors in statistical reporting")
+```
+
+A comparisons of these results with those of the meta-analysis on the full sample (see `2_main_meta.html`) indicates that the exclusion of these sources did not change the overall findings, as the differences in estimated *r* were <= .003.
+
+# Use of objective measures only
+
+```{r message=FALSE}
+dataset_obj <- dataset %>% filter(rater == "Objective")
+run_main_meta(dataset_obj) %>% 
+  tab_header("Meta-analysis results with objective performance measures only")
+```
+
+A comparisons of these results with those of the meta-analysis on the full sample (see `2_main_meta.html`) yields results that could be expected based on the moderator analyses for objective vs subjective measures: the estimated effects based on objetive measures only are larger for demographic and smaller for job-related diversity than those based on the full sample, though confidence intervals overlap. There is no difference for cognitive diversity.
+
+```{r}
+run_univariate_moderators <- function(data, label, exclude = NULL) {
+  if (missing(label)) {
+    stop("Please provide a label for the univariate moderator analysis.")
+  }
+  if (!is.null(exclude)) {
+    cat_moderators <- setdiff(cat_moderators, exclude)
+    cont_moderators <- setdiff(cont_moderators, exclude)
+  }
+  cat_file <- paste0("data/single_cat_moderator_tests_", label, ".qs")
+  if (file.exists(cat_file)) {
+    single_cat_moderator_tests <- qs::qread(cat_file)
+    if (any(names(single_cat_moderator_tests) != cat_moderators)) {
+      warning("File on disk does not match current list of moderators. Consider deleting it to re-estimate.")
+    }
+  } else {
+    single_cat_moderator_tests <- with_progress({
+      cat_moderators %>%
+        set_names() %>%
+        map(\(moderator) single_cat_moderator_test(moderator, data))
+    })
+    qs::qsave(single_cat_moderator_tests, cat_file)
+  }
+  cont_file <- paste0("data/single_cont_moderator_tests_", label, ".qs")
+  if (file.exists(cont_file)) {
+    single_cont_moderator_tests <- qs::qread(cont_file)
+    if (any(names(single_cont_moderator_tests) != cont_moderators)) {
+      warning("File on disk does not match current list of moderators. Consider deleting it to re-estimate.")
+    }
+  } else {
+    single_cont_moderator_tests <- with_progress({
+      cont_moderators %>%
+        set_names() %>%
+        map(\(moderator) single_cont_moderator_test(moderator, data))
+    })
+    qs::qsave(single_cont_moderator_tests, cont_file)
+  }
+  list(single_cat_moderator_tests = single_cat_moderator_tests, single_cont_moderator_tests = single_cont_moderator_tests)
+}
+mods <- run_univariate_moderators(dataset_obj, "objective_only", exclude = "rater")
+
+cat_summary <- mods$single_cat_moderator_tests %>%
+  map_dfr("moderator_test", .id = "moderator") %>%
+  mutate(
+    domain = str_remove(domain, "domain"),
+    domain = case_when(
+      domain == "Job" ~ "Job-related",
+      TRUE ~ domain
+    )
+  )
+cont_summary <- bind_rows(
+  mods$single_cont_moderator_tests %>% map_dfr("robust_across", .id = "moderator") %>% as_tibble() %>% mutate(domain = "Overall") %>% filter(Coef != "intrcpt"),
+  mods$single_cont_moderator_tests %>% map_dfr("robust_domain", .id = "moderator") %>% as_tibble() %>% filter(str_detect(Coef, ":")) %>%
+    mutate(domain = str_extract(Coef, ".*:") %>% str_remove("domain") %>% str_remove(":"))
+)
+
+ks <- mods$single_cat_moderator_tests %>%
+  map_dbl(~ .x$meta_models$mod_domains$k) %>%
+  tibble(moderator = names(mods$single_cat_moderator_tests), k = .) %>%
+  bind_rows(mods$single_cont_moderator_tests %>% map_dbl(~ .x$meta_models$mod_domains$k) %>% tibble(moderator = names(mods$single_cont_moderator_tests), k = .)) %>%
+  rowwise() %>%
+  mutate(moderator = var_names$new[var_names$old == moderator]) %>%
+  ungroup()
+
+bind_rows(
+  cat_summary %>% select(moderator, p_val, domain),
+  cont_summary %>% select(moderator, p_val = p_Satt, domain)
+) %>%
+  rowwise() %>%
+  mutate(
+    p_fmt = paste(sigstars(p_val)) %>% str_replace_all("&dagger;", "†"), # .docx fails with this HTML code in body
+    moderator = var_names$new[var_names$old == moderator]
+  ) %>%
+  select(-p_val) %>%
+  pivot_wider(names_from = "domain", values_from = "p_fmt") %>%
+  left_join(ks, by = "moderator") %>%
+  transmute(Moderator = moderator, k, Overall, Demographic, Cognitive, `Job-related`) %>%
+  gt::gt() %>%
+  tab_header(title = "Univariate moderator tests with objective performance measures only") %>%
+  tab_spanner(md("Significance tests"), Overall:`Job-related`) %>%
+  cols_align(align = "center", Overall:`Job-related`) %>%
+  cols_label(.fn = md) %>%  
+  tab_source_note(md(paste0("\\", timesaveR:::.make_stars_note(timesaveR:::std_stars[-1])))) %>%
+  gt_apa_style()
+
+ps <- cat_plots(mods$single_cat_moderator_tests[c(1, 4, 6)], NULL, dataset_obj)
+wrap_plots(map(ps, "plot"))
+```
+
+Regarding moderators, the only notable difference is that the larger effect sizes for focal hypotheses rather than descriptive results can only be seen for demographic diversity when the sample is restricted to objective meausures. Otherwise, the results are consistent with the full sample.
