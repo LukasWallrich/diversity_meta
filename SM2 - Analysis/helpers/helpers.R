@@ -505,16 +505,6 @@ dummy_code <- function(x) {
   as.data.frame(new)
 }
 
-
-for(i in seq_along(names(df))) {
-  n_rows <- nrow(df)
-  perc_missing <- 15 # percentage missing data
-  row_missing <- sample(1:n_rows, sample(1:n_rows, round(perc_missing/100 * n_rows,0))) # sample randomly x% of rows
-  col_missing <- i # define column
-  df[row_missing, col_missing] <- NA # assign missing values
-}
-
-
 # From timesaveR, but extended to format group labels
 gt_apa_style <- function(gt_table) {
   gt_table %>%

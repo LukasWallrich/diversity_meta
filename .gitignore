@@ -17,3 +17,6 @@ full_text
 .lintr
 statcheck_results/
 OUT
+~$*
+hofstede.csv
+retractions.csv
