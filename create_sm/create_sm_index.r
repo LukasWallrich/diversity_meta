@@ -1,8 +1,12 @@
 # Nested list of reports
 report_files <- list(
   "SM1: Search & Screening" = list(
-    "A: Details of Search Strategy" = c("SM1 - Search and Screening/SM1a - Details on search strategy.pdf"), 
-    "E: PRISMA Flow Diagram numbers" = c("SM2 - Analysis/1a_prisma_flowchart_data.html"),
+    "A: Details of Search Strategy" = c("SM1 - Search and Screening/SM 1A - Details on search strategy.pdf"), 
+    "B: Benchmark of ASySD deduplication performance" = c("SM1 - Search and Screening/SM 1B - ASySD-benchmark.html"),
+    "C: Screening process for refs from backward-chasing" = c("SM1 - Search and Screening/9---backwards-chasing-automated-screening.html"),
+    "D: Exclusions for major risk of bias" = c("SM1 - Search and Screening/SM 1D - Exclusions.pdf"),
+    "E: Details on Moderator Coding" = c("SM1 - Search and Screening/SM 1E - moderator coding details.pdf"),
+    "F: PRISMA Flow Diagram numbers" = c("SM2 - Analysis/1a_prisma_flowchart_data.html"),
     "Code Repository" = "https://github.com/LukasWallrich/diversity_meta/tree/main/SM1%20-%20Search%20and%20Screening"),
   "SM2: Analysis" = list(
     "A: Dataset description" = c("SM2 - Analysis/1_prep_and_describe_data.html"),
@@ -11,10 +15,12 @@ report_files <- list(
     "D: Publication Bias Tests" = c("SM2 - Analysis/4_publication-bias.html"),
     "E: Exploratory Analyses" = c("SM2 - Analysis/5_exploration.html"),
     "F: Robustness checks" = c("SM2 - Analysis/6_robustness.html"),
-    
+    "G: Non-linear relationships" = c("SM2 - Analysis/SM 2G - non-linear relationships.pdf"),
     "Code Repository" = "https://github.com/LukasWallrich/diversity_meta/tree/main/SM2%20-%20Analysis"
   )
 )
+
+
 
 # Function to recursively copy files and generate HTML for reports
 generate_html <- function(reports, base_path = "docs/") {
