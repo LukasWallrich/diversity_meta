@@ -11,7 +11,7 @@ report_files <- list(
   "SM2: Analysis" = list(
     "A: Dataset description" = c("SM2 - Analysis/1_prep_and_describe_data.html"),
     "B: Meta-Analysis Results" = c("SM2 - Analysis/2_main_meta.html"),
-    "C: Moderator tests" = c("http://NA"), # Not ready yet
+    "C: Moderator tests" = c("SM2 - Analysis/3_moderators.html"),
     "D: Publication Bias Tests" = c("SM2 - Analysis/4_publication-bias.html"),
     "E: Exploratory Analyses" = c("SM2 - Analysis/5_exploration.html"),
     "F: Robustness checks" = c("SM2 - Analysis/6_robustness.html"),

@@ -1,23 +1,18 @@
 ---
-title: "Diversity and team-performance meta-analysis"
+title: "Moderator analyses"
 description: null
 output:
   html_document:
     theme: united
     toc: yes
     code_folding: hide
-  pdf_document:
-    fig_height: 6
-    fig_width: 8
-  word_document: default
-Author: Lukas Wallrich 
 ---
 
 # Overview
 
 This file visualises the distribution of effect sizes across the moderators, and then conducts moderation tests using univariate analyses, meta-regression and meta-CART approaches.
 
-```{r setup, message=FALSE, include=FALSE}
+```{r setup, message=FALSE}
 # For reproducibility package versions are locked to a specific date
 if (!require(groundhog)) install.packages('groundhog')
 groundhog::groundhog.library(c("readxl", "metaforest", "metafor", "tidyverse", "clubSandwich", "cli", "rsprite2", "esc", "ggtext",
@@ -29,6 +24,7 @@ groundhog::groundhog.library(c("lukaswallrich/timesaveR"), date = "2023-07-09")
 groundhog::groundhog.library(c("patchwork"), date = "2023-07-09")
 
 source("helpers/metacart_fix.R") # metacart broke with R 4.2.0 due to a change in if-statement evaluation. This fix changes `class ==` to `inherits()`
+source("helpers/metacart_plot.R")
 
 source("helpers/helpers.R")
 source("helpers/equivalence_testing.R")
@@ -48,7 +44,7 @@ rho <- 0.6
 
 ## Distribution of effect sizes
 
-```{r fig.height=12}
+```{r effect-size-plot, fig.height=12, warning=FALSE}
 
 # Get confidence intervals based on the adjusted standard errors (for effective sample size and unreliability)
 get_cis <- function(r_adj, adjustment_ratio, n, conf.level = 0.95) {
@@ -94,7 +90,7 @@ dataset_spec <- dataset %>%
     geom_pointrange(aes(color = color), alpha = 0.5, size = 0.6, fatten = 1) +
     theme_minimal() +
     scale_color_identity() +
-    theme(axis.line = element_line(size = 0.5), legend.position = "none",
+    theme(axis.line = element_line(linewidth = 0.5), legend.position = "none",
           panel.spacing = unit(0.75, "lines"), axis.text = element_text(color = "black")) +
     labs(x = "", y = "r (adjusted)") +
   geom_hline(yintercept = 0)
@@ -149,7 +145,7 @@ ggplot(aes(x = specification, y = value, color = color)) +
     scale_color_identity() +
     theme_minimal() +
     facet_grid(key ~ ., scales = "free_y", space = "free_y", switch = "y") +
-    theme(axis.line = element_line(size = 0.5), 
+    theme(axis.line = element_line(linewidth = 0.5), 
           legend.position = "none",
           panel.spacing = unit(0.75, "lines"), 
           axis.text = element_text(color = "black"),
@@ -171,7 +167,7 @@ ggplot(aes(x = specification, y = value, color = color)) +
 
 # Individually test moderators
 
-For interpretability and comparability with earlier work ... using observed data (so different datasets for each moderator).
+For interpretability and comparability with earlier work, we started with univariate tests using the observed/coded data (which evidently results in different datasets for each moderator).
 
 ```{r univariate-functions}
 
@@ -595,7 +591,7 @@ boot_R2 <- function(dat, indices, moderator, other_moderators = NULL, progress =
 ```
 
 
-```{r}
+```{r moderator-tests}
 dataset$objective_rater <- fct_collapse(dataset$rater, "Objective" = "Objective", 
                                         "Subjective" = c("Subjective - self", "Subjective - supervisor", "Subjective - external"))
 
@@ -687,7 +683,7 @@ ks <- single_cat_moderator_tests %>%
 
 The code to bootstrap R2s for the moderators (for equivalence testing) is very slow - it takes about 7-8 hours per moderator on an M2 Macbook Air. Therefore, it was run on AWC EC2 instances. The code used is found in `helpers/aws_code R2.R` but based on the code provided for reference below.
 
-```{r}
+```{r moderator-R2-bootstrapping}
 # Run as background job
 reg_mods <- c(cat_moderators, cont_moderators)
 
@@ -745,7 +741,7 @@ write_rds(bs_R2s, "data/bs_R2s_expl_mods.rds")
 
 ```
 
-```{r}
+```{r moderator-equivalence}
 library(boot)
 
 if (!file.exists("data/mod_R2_equivalence.qs")) {
@@ -800,7 +796,7 @@ if (!file.exists("data/mod_R2_equivalence_expl.qs")) {
 
 ```
 
-```{r}
+```{r mod-summary-table}
 mod_R2s <-  bind_rows(mod_R2s, mod_R2s_expl)
 
 mod_table <- bind_rows(cat_summary %>% select(moderator, p_val, domain),
@@ -822,7 +818,7 @@ mod_table <- bind_rows(cat_summary %>% select(moderator, p_val, domain),
   tab_spanner(md("Overall effect size"),  id = "overall-spanner", `R<sup>2</sup>`:`R<sup>2</sup> < 5%`) %>% 
    cols_label(.fn = md) %>% 
   gt::tab_source_note(timesaveR:::std_stars %>% {glue::glue_collapse(paste(names(.),.), ", ")} %>% html()) %>% 
-  gt_apa_style()
+  gt_apa_style(fmt_labels_md = TRUE)
 
 gtsave(mod_table, "tables/moderator_tests.docx")
 
@@ -830,13 +826,16 @@ mod_table
 
 ```
 
-```{r fig.height=13, fig.width=9}
+```{r moderator-plots-cat, fig.height=13, fig.width=9}
 
 sig_mods <- c(single_cat_moderator_tests[c(1, 3, 7, 5)], single_expl_cat_moderator_tests[7], single_expl_cat_moderator_tests[2])
 many_cats <- single_expl_cat_moderator_tests[c(1, 5)]
 
+ns_mods <- c(single_cat_moderator_tests[c(2, 4, 6, 8)], single_expl_cat_moderator_tests[3])
+
 main_plots <- cat_plots(sig_mods)
 tall_plots <- cat_plots(many_cats, minimum_articles = 5)
+ns_plots <- cat_plots(ns_mods, minimum_articles = 5)
   
 p <- wrap_plots(map(main_plots, "plot"), tag_level = "new") +
   plot_annotation(tag_levels = 'A', title = "Estimated correlations depending on moderator levels",
@@ -848,8 +847,14 @@ p2 <- wrap_plots(map(tall_plots, "plot"), tag_level = "new") +
                   subtitle = "Estimated from univariate meta-regressions with cluster-robust standard errors",
                   caption = "95% confidence intervals shown with error bars. Dotted lines indicate thresholds for small effects (|r| < .1).\nLevels (and domain-level combinations) based on fewer than 5 samples are not shown.")
 
+p3 <- wrap_plots(map(ns_plots, "plot"), tag_level = "new") +
+  plot_annotation(tag_levels = list(LETTERS[9:(9+length(ns_plots))]), title = "Estimated correlations for non-significant moderators (in SM)",
+                  subtitle = "Estimated from univariate meta-regressions with cluster-robust standard errors",
+                  caption = "95% confidence intervals shown with error bars. Dotted lines indicate thresholds for small effects (|r| < .1).\nLevels (and domain-level combinations) based on fewer than 5 samples are not shown.")
+
 coefs <- bind_rows(main_plots %>% map_dfr("coefs", .id = "moderator"),
-                   tall_plots %>% map_dfr("coefs", .id = "moderator")) %>% select(moderator, domain, everything()) %>% 
+                   tall_plots %>% map_dfr("coefs", .id = "moderator"),
+                   ns_plots %>% map_dfr("coefs", .id = "moderator")) %>% select(moderator, domain, everything()) %>% 
   rowwise() %>% mutate(moderator = var_names$new[var_names$old == moderator]) %>% ungroup()
 
 ggsave("figures/moderated_estimates_cat.png", p, width = 9, height = 13)
@@ -857,19 +862,28 @@ ggsave("figures/moderated_estimates_tall.png", p2, width = 9, height = 11)
 
 p
 p2
+p3
 
-coefs %>% arrange(moderator, domain) %>% group_by(moderator, domain) %>%  gt() %>% 
-  fmt_number(columns = c(beta, se, df), decimals = 2) %>% fmt(p, fns = \(x) fmt_p(x, equal_sign = FALSE)) %>% 
-  cols_label(coef = "", beta = "*r*", p = "*p*", se = "SE", .fn = md) %>%
+coefs %>% 
+  rename(`*r*` = beta, SE = se, zdf = df, `zz*p*` = p) %>%
+  pivot_wider(names_from = "domain", values_from = c(`*r*`, SE, zdf, `zz*p*`), names_glue = "{domain}_{.value}") %>%
+  group_by(moderator) %>% 
+  select(moderator, coef, sort(names(.))) %>%  gt()  %>% 
+  tab_spanner_delim("_") %>% 
+  cols_label(coef = "") %>% 
+  cols_label(.list = stats::setNames(lapply(unlist(.$`_boxhead`$column_label), 
+            \(x) str_remove_all(x, "z") %>% md()), names(.$`_data`))) %>% 
+  fmt(columns = matches(fixed("*r*")), fns = \(x) fmt_cor(x, digits = 3)) %>% 
+  fmt(columns = matches(fixed("*p*")), fns = \(x) fmt_p(x, equal_sign = FALSE)) %>% 
+  fmt_number(columns = matches("df"), decimals = 0) %>% 
+  fmt_number(columns = matches("SE"), decimals = 2)  %>%
   gt_apa_style() %>% 
   cols_align("right", coef) %>% 
-  tab_style(
-    style = list(cell_text(weight = "bold")),
-    locations = cells_row_groups()
-  )
+  tab_header(title = "Estimated correlations for categorical moderator levels") %>% 
+  tab_source_note("NB: *df* are adjusted to robustly account for clustering, they do not indicate the number of observations. NA are shown where there were insufficient observations to estimate that value.")
 ```
 
-```{r fig.height=13, fig.width=9}
+```{r moderator-plots-cont, fig.height=13, fig.width=9}
 
 predict_robust <- function(mod, moderator, include_domains = FALSE) {
   # From Viechtbauer - https://stat.ethz.ch/pipermail/r-sig-meta-analysis/2021-October/003516.html
@@ -989,11 +1003,13 @@ p
 
 ## Impute data
 
-- Exclude variables with no variance (only positive) and > 95% missing (psych safety and diversity climate)
-- How to deal with M*N*AR variables (virtuality and authority diff)? Would require many post-hoc choices - so in spirit of RR, omitted.
-- Criterion only coded in few cases, and many were mixed / not applicable - so cannot be meaningfully imputed. Omitted.
+To impute data for the meta-regression, we had to exclude some variables where imputation would not make sense:
 
-```{r}
+- Two variables without variance (*psychological safety* and *diversity climate*), which were only reported when they were positive, and that in <5 % of cases.
+- Two variables that were strongly missing not at random - *virtuality* that appeared to be reported only for virtual teams, except for specific situations where co-presence was essential, and authority differentiation that was again mostly reported where it was low. Imputing this would require many many post-hoc choices, so in the spirit of a Registered Report, we ommitted it.
+- The performance criterion could only be coded in a few cases, and many were mixed / not applicable - so cannot be meaningfully imputed. Omitted.
+
+```{r data-imputation}
 if (file.exists("data/imputed_data.rds")) {
   imp <- read_rds("data/imputed_data.rds")
 } else {
@@ -1091,7 +1107,7 @@ job::job("impute_data" = {
 
 
 
-```{r}
+```{r mi-pool-functions}
 # From https://www.jepusto.com/mi-with-clubsandwich/
 
 pool_robust <- function(models) {
@@ -1174,7 +1190,7 @@ pooled_Wald <- function(models, which_coefs) {
 
 ## Run meta-regression
 
-```{r}
+```{r meta-regression}
 if (file.exists("data/imp_meta_reg_mods.qs")) {
   imputed_mods <- qs::qread("data/imp_meta_reg_mods.qs")
 } else {
@@ -1233,7 +1249,7 @@ if (file.exists("data/imp_meta_reg_mods.qs")) {
 }
 ```
 
-```{r}
+```{r meta-reg-pooling-testing, cache=TRUE}
 # Pool results
 ## Remove failed convergence
 m <- length(imputed_mods)
@@ -1336,9 +1352,11 @@ coefs_domains %>%
 
 # Meta-CART
 
+Due to its probabilistic nature, metaCART had to be run run repeatedly (here 50 times on each of 10 datasets, using two different estimation methods). This is very slow (~24 hours on 16 cores), so was run on an AWC EC2 instance - see `helpers/aws_code metacart.R`. The code below is just provided for reference - here, results are loaded from the file as downloaded from AWS.
+
 ## Combine ES
 
-```{r}
+```{r metacart-prep}
 dataset_aggregated <- dataset %>% 
   group_by(articlestudy, pub_status, art_focus, year_merged, design, rater, collectivism, interdep, 
            complexity, longevity, virtuality, domain, sub_dom, meas_type) %>% 
@@ -1360,11 +1378,9 @@ dataset_aggregated <- as_tibble(dataset_aggregated)
 qs::qsave(dataset_aggregated, "data/dataset_aggregated_metacart.qs")
 ```
 
-From here, the process is probabilistic, as effect sizes will be sampled, and then metaCART run repeatedly. This is very slow, so was run on an AWC EC2 instance - see `helpers/aws_code metacart.R`. The code below is just provided for reference - here, results are loaded from file as downloaded from AWS.
-
 ## Impute best and worst case
 
-```{r best-imputation-functions}
+```{r metacart-imputation-functions}
 
 dummy_code_df <- function(df, exclude_column, drop_first = TRUE) {
   if (!is.character(exclude_column)) {
@@ -1567,136 +1583,139 @@ impute_best_polyreg <- function(dat, var_name) {
 
 ```
 
-```{r}
+```{r metacart-imputation}
 n_datasets <- 10
 n_trees <- 50
+if (!(file.exists("data/metacart_trees_ahead.qs")) || !(file.exists("data/metacart_trees_standard.qs"))) { # Do not run if estimation has already been done
 
-if (!file.exists("data/cart_imputed_best.qs") || !file.exists("data/cart_imputed_random.qs")) {
-  set.seed(2124)
-  dataset_aggregated <- qs::qread("data/dataset_aggregated_metacart.qs")
+  if (!(file.exists("data/cart_imputed_best.qs")) || !(file.exists("data/cart_imputed_random.qs"))) { # Do not run if imputation has already been done
 
-  datasets <- list()
-  datasets_imp_best <- list()
-  datasets_imp_rand <- list()
+    set.seed(2124)
+    dataset_aggregated <- qs::qread("data/dataset_aggregated_metacart.qs")
 
-  # specify variables to include in imputation (those in metaCart and relevant other preds)
-  mi_vars <- c(
-    "art_focus", "pub_status", "design", "setting", "ind_sector", "team_function",
-    "n_teams", "stud_sample",
-    "tmt", "domain", "sub_dom", "meas_type", "rater", "interdep", "complexity", "longevity", "power_distance",
-    "collectivism", "year_merged", "citation_count"
-  )
+    datasets <- list()
+    datasets_imp_ahead <- list()
+    datasets_imp_standard <- list()
 
-  # Resample datasets
-  for (i in seq_len(n_datasets)) {
-    datasets[[i]] <- dataset_aggregated %>%
-      group_by(articlestudy, domain) %>%
-      slice_sample(n = 1) %>%
-      ungroup() %>%
-      select(articlestudy, domain, r_adj, se, var_adj, all_of(mi_vars)) %>%
-      mutate(across(c(where(is.character), -articlestudy), factor))
-  }
-
-  # Impute  using best prediction
-
-  ## Define models
-
-  polr_vars <- c("interdep", "complexity", "longevity")
-
-  polyreg_vars <- c(
-    "art_focus", "pub_status", "design", "setting", "ind_sector", "team_function",
-    "stud_sample", "tmt", "domain", "meas_type", "rater"
-  )
-
-  special_var <- c("sub_dom")
-
-  pmm_vars <- c("power_distance", "collectivism")
-
-  for (i in seq_along(datasets)) {
-    datasets_imp_best[[i]] <- datasets[[i]]
-
-    for (var in polr_vars) {
-      if (any(is.na(datasets_imp_best[[i]][[var]]))) {
-        message("\n\n Imputing ", var)
-        datasets_imp_best[[i]][[var]] <- impute_sequentially(datasets_imp_best[[i]] %>% select(-articlestudy), var, impute_best_polr)
-      }
-    }
-
-    for (var in polyreg_vars) {
-      if (any(is.na(datasets_imp_best[[i]][[var]]))) {
-        message("\n\n Imputing ", var)
-        datasets_imp_best[[i]][[var]] <- impute_sequentially(datasets_imp_best[[i]] %>% select(-articlestudy), var, impute_best_polyreg)
-      }
-    }
-
-    # Impute sub-domains by domain, to ensure valid values
-    temp_split <- split(datasets_imp_best[[i]], datasets_imp_best[[i]]$domain)
-    for (domain in names(temp_split)) {
-      temp_split[[domain]]$sub_dom <- impute_sequentially(temp_split[[domain]] %>% select(-articlestudy), "sub_dom", impute_best_polyreg)
-    }
-
-    datasets_imp_best[[i]] <- bind_rows(temp_split)
-
-
-    # For continuous variables, use PMM function in mice
-    imp <- mice(datasets_imp_best[[i]], maxit = 0)
-
-    methods <- imp$method
-    methods[] <- ""
-    methods[pmm_vars] <- "pmm"
-    preds <- imp$predictorMatrix
-    preds[] <- 0
-
-    preds[pmm_vars, mi_vars] <- 1
-    preds[pmm_vars, "r_adj"] <- 1
-    preds[pmm_vars, "se"] <- 1
-    preds[pmm_vars, pmm_vars] <- 0 # Always missing together, so this would not help
-
-    imp <- mice(datasets_imp_best[[i]],
-      m = 1, seed = 2124 + i, predictorMatrix = preds,
-      method = methods, donors = 1
+    # specify variables to include in imputation (those in metaCart and relevant other preds)
+    mi_vars <- c(
+      "art_focus", "pub_status", "design", "setting", "ind_sector", "team_function",
+      "n_teams", "stud_sample",
+      "tmt", "domain", "sub_dom", "meas_type", "rater", "interdep", "complexity", "longevity", "power_distance",
+      "collectivism", "year_merged", "citation_count"
     )
 
-    datasets_imp_best[[i]] <- datasets_imp_best[[i]] %>%
-      select(-all_of(pmm_vars)) %>%
-      left_join(imp %>% complete() %>% select(articlestudy, domain, all_of(pmm_vars)))
-  }
-
-
-  # Impute  using random prediction
-
-  for (i in seq_along(datasets)) {
-    datasets_imp_rand[[i]] <- datasets[[i]]
-
-
-    datasets_imp_rand[[i]] <- datasets_imp_rand[[i]] %>%
-      select(-sub_dom) %>%
-      impute_with_random_draw() %>%
-      left_join(datasets_imp_rand[[i]] %>% select(articlestudy, domain, sub_dom))
-
-    # Impute sub-domains by domain, to ensure valid values
-    temp_split <- split(datasets_imp_rand[[i]], datasets_imp_rand[[i]]$domain)
-    for (domain in names(temp_split)) {
-      temp_split[[domain]] <- impute_with_random_draw(temp_split[[domain]])
+    # Resample datasets
+    for (i in seq_len(n_datasets)) {
+      datasets[[i]] <- dataset_aggregated %>%
+        group_by(articlestudy, domain) %>%
+        slice_sample(n = 1) %>%
+        ungroup() %>%
+        select(articlestudy, domain, r_adj, se, var_adj, all_of(mi_vars)) %>%
+        mutate(across(c(where(is.character), -articlestudy), factor))
     }
 
-    datasets_imp_rand[[i]] <- bind_rows(temp_split)
-  }
-  datasets_imp_best %>% qs::qsave("data/cart_imputed_best.qs")
-  datasets_imp_rand %>% qs::qsave("data/cart_imputed_random.qs")
-} else {
-  datasets_imp_rand <- qs::qread("data/cart_imputed_random.qs")
-  datasets_imp_best <- qs::qread("data/cart_imputed_best.qs")
+    # Impute  using best prediction
 
-  if (!length(datasets_imp_best) == n_datasets || !length(datasets_imp_rand) == n_datasets) {
-    warning("Number of loaded datasets does not macth `n_datasets`. Consider re-running imputation.")
+    ## Define models
+
+    polr_vars <- c("interdep", "complexity", "longevity")
+
+    polyreg_vars <- c(
+      "art_focus", "pub_status", "design", "setting", "ind_sector", "team_function",
+      "stud_sample", "tmt", "domain", "meas_type", "rater"
+    )
+
+    special_var <- c("sub_dom")
+
+    pmm_vars <- c("power_distance", "collectivism")
+
+    for (i in seq_along(datasets)) {
+      datasets_imp_ahead[[i]] <- datasets[[i]]
+
+      for (var in polr_vars) {
+        if (any(is.na(datasets_imp_ahead[[i]][[var]]))) {
+          message("\n\n Imputing ", var)
+          datasets_imp_ahead[[i]][[var]] <- impute_sequentially(datasets_imp_ahead[[i]] %>% select(-articlestudy), var, impute_best_polr)
+        }
+      }
+
+      for (var in polyreg_vars) {
+        if (any(is.na(datasets_imp_best[[i]][[var]]))) {
+          message("\n\n Imputing ", var)
+          datasets_imp_best[[i]][[var]] <- impute_sequentially(datasets_imp_best[[i]] %>% select(-articlestudy), var, impute_best_polyreg)
+        }
+      }
+
+      # Impute sub-domains by domain, to ensure valid values
+      temp_split <- split(datasets_imp_best[[i]], datasets_imp_best[[i]]$domain)
+      for (domain in names(temp_split)) {
+        temp_split[[domain]]$sub_dom <- impute_sequentially(temp_split[[domain]] %>% select(-articlestudy), "sub_dom", impute_best_polyreg)
+      }
+
+      datasets_imp_best[[i]] <- bind_rows(temp_split)
+
+
+      # For continuous variables, use PMM function in mice
+      imp <- mice(datasets_imp_best[[i]], maxit = 0)
+
+      methods <- imp$method
+      methods[] <- ""
+      methods[pmm_vars] <- "pmm"
+      preds <- imp$predictorMatrix
+      preds[] <- 0
+
+      preds[pmm_vars, mi_vars] <- 1
+      preds[pmm_vars, "r_adj"] <- 1
+      preds[pmm_vars, "se"] <- 1
+      preds[pmm_vars, pmm_vars] <- 0 # Always missing together, so this would not help
+
+      imp <- mice(datasets_imp_best[[i]],
+        m = 1, seed = 2124 + i, predictorMatrix = preds,
+        method = methods, donors = 1
+      )
+
+      datasets_imp_best[[i]] <- datasets_imp_best[[i]] %>%
+        select(-all_of(pmm_vars)) %>%
+        left_join(imp %>% complete() %>% select(articlestudy, domain, all_of(pmm_vars)))
+    }
+
+
+    # Impute  using random prediction
+
+    for (i in seq_along(datasets)) {
+      datasets_imp_rand[[i]] <- datasets[[i]]
+
+
+      datasets_imp_rand[[i]] <- datasets_imp_rand[[i]] %>%
+        select(-sub_dom) %>%
+        impute_with_random_draw() %>%
+        left_join(datasets_imp_rand[[i]] %>% select(articlestudy, domain, sub_dom))
+
+      # Impute sub-domains by domain, to ensure valid values
+      temp_split <- split(datasets_imp_rand[[i]], datasets_imp_rand[[i]]$domain)
+      for (domain in names(temp_split)) {
+        temp_split[[domain]] <- impute_with_random_draw(temp_split[[domain]])
+      }
+
+      datasets_imp_rand[[i]] <- bind_rows(temp_split)
+    }
+    datasets_imp_best %>% qs::qsave("data/cart_imputed_best.qs")
+    datasets_imp_rand %>% qs::qsave("data/cart_imputed_random.qs")
+  } else {
+    datasets_imp_rand <- qs::qread("data/cart_imputed_random.qs")
+    datasets_imp_best <- qs::qread("data/cart_imputed_best.qs")
+
+    if (!length(datasets_imp_best) == n_datasets || !length(datasets_imp_rand) == n_datasets) {
+      warning("Number of loaded datasets does not macth `n_datasets`. Consider re-running imputation.")
+    }
   }
 }
 ```
 
 ## Run meta-CART
 
-```{r}
+```{r metacart-estimation}
 
 run_meta_cart <- function(data, reps, seed = NULL, method = c("standard", "ahead")) {
   if (!is.null(seed)) {
@@ -1767,6 +1786,8 @@ run_meta_cart <- function(data, reps, seed = NULL, method = c("standard", "ahead
   }
 }
 
+if (!(file.exists("data/metacart_trees_ahead.qs")) || !(file.exists("data/metacart_trees_standard.qs"))) { #Do not run if estimation has already been done
+
   datasets_imp_best_list <- list()
   datasets_imp_rand_list <- list()
   
@@ -1798,7 +1819,8 @@ run_meta_cart <- function(data, reps, seed = NULL, method = c("standard", "ahead
   cores <- future::availableCores()
   
   plan(multisession, workers = cores)
-  
+}
+
 if (!(file.exists("data/metacart_trees_standard.qs"))) {
 
 
@@ -1849,11 +1871,16 @@ if (!(file.exists("data/metacart_trees_ahead.qs"))) {
 }
 ```
 
-## Aggregate multiple runs
+## Aggregate the runs and plot results
 
-```{r}
+```{r metacart-aggregation}
 trees_standard <- qs::qread("data/metacart_trees_standard.qs")
 trees_ahead <- qs::qread("data/metacart_trees_ahead.qs")
+
+names(trees_standard) <- paste0(names(trees_standard), "_standard")
+names(trees_ahead) <- paste0(names(trees_ahead), "_ahead")
+
+trees <- c(trees_standard, trees_ahead)
 
 get_mode <- function(x) {
   tbl <- table(x)
@@ -1861,81 +1888,124 @@ get_mode <- function(x) {
   paste(mode_val, collapse = " | ")
 }
 
-leaf_counts <- trees_standard %>% 
+leaf_counts <- trees %>% 
   imap_dfr(\(mods, dataset) {
     mods %>% discard(is.null) %>% map_int(\(mod) length(mod$n)) %>% tibble(n = .) %>% 
-  summarise(mean = mean(n, na.rm = TRUE), median = median(n, na.rm = TRUE), 
-            mode = get_mode(n), max = max(n, na.rm = TRUE), min = min(n, na.rm = TRUE), ns = list(n)) %>% 
+  summarise(mode = get_mode(n), ns = list(n)) %>% 
   mutate(dataset = dataset) 
-  }) %>% mutate(cart_method = "standard")  %>% 
-  separate(dataset, into = c("imp_method", "domain", "run"), sep = "_") 
+  }) %>% 
+  separate(dataset, into = c("imp_method", "domain", "run", "cart_method"), sep = "_") 
 
-leaf_counts %>% group_by(imp_method, domain) %>% 
+leaf_counts %>% group_by(imp_method, domain, cart_method) %>% 
   summarise(mode = get_mode(unlist(ns)),
-            any_moderation = mean(unlist(ns) > 1),
-            potential_interactions = mean(unlist(ns) > 2),
-            .groups = "drop")
+            .groups = "drop") %>% 
+  arrange(desc(mode)) %>% 
+  gt() %>% tab_header("Modal number of leaves in metaCART trees (based on 500 runs per row)") %>% 
+  tab_source_note("Note: 'standard' method uses default method, 'ahead' method uses the lookahead algorithm better suited to continuous moderators.") %>%
+  gt_apa_style()
 
-moderator_combinations <- trees_standard %>% 
-  imap_dfr(\(mods, dataset) {
-    mods %>% discard(is.null) %>% map_chr(\(mod) mod$moderators %>% sort() %>% paste(collapse = " | ") %>% na_if("")) %>% tibble(moderators = .) %>% 
- count(moderators, sort = TRUE) %>% 
-  mutate(dataset = dataset) 
-  }) %>% mutate(cart_method = "standard")  %>% 
-  separate(dataset, into = c("imp_method", "domain", "run"), sep = "_") %>% 
-  group_by(imp_method, domain, moderators, cart_method) %>%
-  summarise(n = sum(n), .groups = "drop") %>% 
-  arrange(imp_method, domain, cart_method, desc(n))
+best_Overall <- trees[which(str_detect(names(trees), "best_Overall.*_ahead"))] %>% list_flatten()
 
+which_3_leaves <- which(sapply(best_Overall, \(x) length(x$n) == 3))
 
-moderator_combinations_long <- moderator_combinations %>% 
-    rename(data_domain = domain) %>% 
-    mutate(row_id = row_number()) %>%
-    separate_rows(moderators, sep = " \\| ") %>%
-    mutate(value = TRUE) 
+moderators <- best_Overall[which_3_leaves] %>% map("moderators") %>% map_chr(~paste(collapse = " | ", .))
 
-# Which variables are frequently identified as moderators?
-moderator_combinations_long %>% 
-  group_by(imp_method, data_domain, cart_method, moderators) %>% 
-  summarise(n = sum(n), share = sum(n)/500, .groups = "drop") %>% 
-  rename(moderator = moderators) %>% 
-  filter(!is.na(moderator)) %>% 
-  arrange(imp_method, data_domain, cart_method, desc(share)) %>% 
-  filter(share >= 0.1)
+table(moderators)[1] %>% {glue::glue("Most frequent moderator combination for 'best' imputation of full dataset: {names(.)} occurred {.} times (out of 500 runs).")}
 
-# Which combinations of at least 2 moderators occur
-moderator_combinations_wide <- moderator_combinations_long %>% 
-  filter(!is.na(moderators)) %>% 
-  pivot_wider(names_from = moderators, values_from = value, 
-  values_fill = list(value = FALSE)) %>% 
-  select(-row_id) %>%
-  mutate(n_mods = rowSums(across(-c(imp_method, data_domain, cart_method, n)))) %>% 
-  filter(n_mods > 1)
+which_collectivism <- which(moderators == "collectivism")
 
+mods_best <- best_Overall[which_3_leaves][which_collectivism] %>% 
+  enframe(name = "names", value = "data") %>% 
+  separate(names, into = c(NA, NA, "dataset", NA, NA), sep = "_") %>% 
+  group_by(dataset) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  pull(data)
 
-# Function to sum 'n' for all rows that include at least the specified pattern
-sum_n_for_pattern <- function(data, pattern) {
-  pattern_data <- data[ , c("n", pattern)]
-  matching_rows <- apply(pattern_data[ , -1], 1, function(x) all(x, na.rm = TRUE))
-  sum(data$n[matching_rows])
-}
+rand_Overall <- trees[which(str_detect(names(trees), "rand_Overall.*_ahead"))] %>% list_flatten()
 
-# Generating all possible combinations of the logical columns
-logical_columns <- names(moderator_combinations_wide)[which(sapply(moderator_combinations_wide, is.logical))]
-combinations <- map(2:length(logical_columns), ~combn(logical_columns, .x, simplify = FALSE)) %>% unlist(recursive = FALSE)
+which_3_leaves <- which(sapply(rand_Overall, \(x) length(x$n) == 3))
 
-# Applying the function for each combination within each group
-pattern_sums_grouped <- moderator_combinations_wide %>%
-  group_by(data_domain, cart_method) %>%
-  group_modify(~map_dfr(combinations, function(comb) {
-    pattern <- paste(comb, collapse=" & ")
-    sum_n <- sum_n_for_pattern(.x, comb)
-    tibble(pattern = pattern, sum_n = sum_n, share = sum_n/1000)
-  })) %>%
-  ungroup()
+moderators <- rand_Overall[which_3_leaves] %>% map("moderators") %>% map_chr(~paste(collapse = " | ", .))
 
-pattern_sums_grouped %>% filter(sum_n != 0) %>% 
-  arrange(data_domain, cart_method, desc(share)) %>% 
-  filter(share >= 0.05)
+table(moderators)[1] %>% {glue::glue("Most frequent moderator combination for 'random' imputation of full dataset: {names(.)} occurred {.} times (out of 500 runs).")}
 
+which_collectivism <- which(moderators == "collectivism")
+
+mods_rand <- rand_Overall[which_3_leaves][which_collectivism] %>% 
+  enframe(name = "names", value = "data") %>% 
+  separate(names, into = c(NA, NA, "dataset", NA, NA), sep = "_") %>% 
+  group_by(dataset) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  pull(data)
+
+```
+
+```{r results='hide'}
+ps_best <- map(mods_best, metacart_plot)
+ps_rand <- map(mods_rand, metacart_plot)
+```
+
+```{r fig.height=10, fig.width=12}
+wrap_plots(ps_best) + plot_annotation(title = "metaCART results for full dataset", subtitle = "... 'best' imputation")
+
+wrap_plots(ps_rand) + plot_annotation(subtitle = "... 'random' imputation")
+
+```
+Overall, these models reliably picks out a small cluster of countries (Turkey, United Arab Emirates and Kuwait, though 5/7 studies with observed collectivism in the 62-63 range are from Turkey). These studies obviously differ from others based on other moderators as well - the following table shows their values on all moderators, so that the reader can decide how to interpret the finding that they have a substantially greater correlation.
+
+```{r}
+dataset %>% filter(collectivism > 61 & collectivism < 64) %>% group_by(id) %>% slice_head(n=1) %>% ungroup() %>% select(author_year, country, all_of(c(cat_moderators, cont_moderators, expl_mods)), -country_grp) %>% 
+  DT::datatable(options = list(scrollX = TRUE, lengthChange = FALSE, searching = FALSE, paging = FALSE)
+)
+```
+
+```{r}
+rand_Job <- trees[which(str_detect(names(trees), "rand_Job.*_ahead"))] %>% list_flatten()
+
+which_3_leaves <- which(sapply(rand_Job, \(x) length(x$n) == 3))
+
+moderators <- rand_Job[which_3_leaves] %>% map("moderators") %>% map_chr(~paste(collapse = " | ", .))
+
+table(moderators)[1] %>% {glue::glue("Most frequent moderator combination for 'rand' imputation of job-related dataset: {names(.)} occurred {.} times (out of 500 runs).")}
+
+which_collectivism <- which(moderators == "collectivism")
+
+mods_rand <- rand_Job[which_3_leaves][which_collectivism] %>% 
+  enframe(name = "names", value = "data") %>% 
+  separate(names, into = c(NA, NA, "dataset", NA, NA), sep = "_") %>% 
+  group_by(dataset) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  pull(data)
+
+best_Job <- trees[which(str_detect(names(trees), "best_Job.*_ahead"))] %>% list_flatten()
+
+which_3_leaves <- which(sapply(best_Job, \(x) length(x$n) == 3))
+
+moderators <- best_Job[which_3_leaves] %>% map("moderators") %>% map_chr(~paste(collapse = " | ", .))
+
+table(moderators)[1] %>% {glue::glue("Most frequent moderator combination for 'rand' imputation of job-related dataset: {names(.)} occurred {.} times (out of 500 runs).")}
+
+which_collectivism <- which(moderators == "collectivism")
+
+mods_best <- best_Job[which_3_leaves][which_collectivism] %>% 
+  enframe(name = "names", value = "data") %>% 
+  separate(names, into = c(NA, NA, "dataset", NA, NA), sep = "_") %>% 
+  group_by(dataset) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  pull(data)
+
+```
+
+```{r results='hide'}
+ps_rand <- map(mods_rand, metacart_plot)
+ps_best <- map(mods_best, metacart_plot)
+```
+
+```{r fig.height=10, fig.width=12}
+wrap_plots(ps_rand) + plot_annotation(title = "metaCART results for Job-related dataset", subtitle = "... 'random' imputation")
+wrap_plots(ps_best) + plot_annotation(subtitle = "... 'best' imputation", caption = "NB: Modal number of leaves was 1 for this dataset - this is only to consider consistency with 'random' imputation.")
 ```

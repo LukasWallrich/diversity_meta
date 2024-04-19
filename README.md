@@ -6,9 +6,9 @@ To be added after review: [Link to article]
 
 # Overview
 
-The supplementary materials are divided into three sections:
+The supplementary materials are divided into two sections:
 
 - `SM1`: Contains code and details on the search and screening process (not directly reproducible due to intervening manual steps)
 - `SM2`: Contains code and results of the analysis (fully reproducible)
 
-The materials are best accessible through the [webpage](https://lukaswallrich.github.io/diversity_meta/) that is build using the code in `create_sm` and saved in `docs`.
+The materials are best accessible through the [webpage](https://lukaswallrich.github.io/diversity_meta/) that is build using the code in `create_sm` and saved in `docs`. The data can also be explored through an [interactive web application](https://2ly.link/1xekY).

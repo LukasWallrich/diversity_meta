@@ -506,8 +506,8 @@ dummy_code <- function(x) {
 }
 
 # From timesaveR, but extended to format group labels
-gt_apa_style <- function(gt_table) {
-  gt_table %>%
+gt_apa_style <- function(gt_table, fmt_labels_md = FALSE) {
+  out <- gt_table %>%
     gt::opt_table_lines(extent = "none") %>%
     gt::tab_options(
       heading.border.bottom.width = 2,
@@ -539,4 +539,8 @@ gt_apa_style <- function(gt_table) {
       style = cell_text(weight = "bold"),
       locations = cells_title(groups = "title")
     )
+
+  if (fmt_labels_md)
+    out <- timesaveR:::fmt_labels_md(out)
+  out
 }

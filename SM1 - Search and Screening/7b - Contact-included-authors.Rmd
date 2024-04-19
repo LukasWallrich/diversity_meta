@@ -121,7 +121,7 @@ We used Apple Script to automatically create the email drafts in Outlook, so tha
 source("helpers/author_email_parts.R")
 
 send_email <- function(subject, content, names, emails, send = FALSE) {
-    script_path <- "applescript_send_email.scpt"  # Update with the correct path to your script
+    script_path <- "applescript_send_email.scpt"  
     send_flag <- ifelse(send, "true", "false")
 
     # Combine names and emails
