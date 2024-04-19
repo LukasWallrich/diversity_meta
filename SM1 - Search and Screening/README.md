@@ -17,3 +17,7 @@ After screening database results, we contacted authors and conducted backward ci
 
 - Author contacts - we scraped emails from journal websites as far as possible (see `7a - scrape_emails.R`) and then composed emails programmatically, using Apple Script to create Outlook drafts (essentially a customised mail-merge process with some extra processing steps appropriate to this context - see `7b - Contact-included-authors.Rmd`). Note that the email addresses themselves are not included here to reduce spam - that list is available on reasonable request.
 - Backwards citation chasing in included articles - we extracted references in included articles from Scopus where possible, and with GROBID otherwise (see `8 - extract for backwards citation chasing.Rmd`), and then filtered them for screening using the ChatGPT API alongside the original search string (see `9 - backwards-chasing automated screening.Rmd`)
+
+# Data availability
+
+Due to a lack of clarity on copyright, we do not share the search results here. The list of all articles that made it to the full-text screening stage can be found in our coding sheets for [English](https://docs.google.com/spreadsheets/d/1pEYZUZvFr8qmULT077y932BUShpJvhs-asRuyyiBKlQ/edit?usp=sharing) and [non-English](https://docs.google.com/spreadsheets/d/1XCjlC3u7Ws2KCjaRQ1R0VuU0mLQ5mHVipmzuGtivLCs/edit?usp=sharing) sources. Other search result files are available on request (though note that we did not record exclusion reasons during the title & abstract screening).

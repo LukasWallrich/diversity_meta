@@ -2,6 +2,7 @@
 *.Rhistory
 *API_keys.R
 *.pdf
+!SM*.pdf
 archive
 *.json
 search_results
@@ -20,3 +21,7 @@ OUT
 ~$*
 hofstede.csv
 retractions.csv
+*_cache/
+*_files/
+bw_chasing_data
+temp_data

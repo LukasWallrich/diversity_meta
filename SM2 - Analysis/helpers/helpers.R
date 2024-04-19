@@ -544,3 +544,69 @@ gt_apa_style <- function(gt_table, fmt_labels_md = FALSE) {
     out <- timesaveR:::fmt_labels_md(out)
   out
 }
+
+download.OSF.file <- function(GUID, Access_Token = NULL, file_name) {
+  pacman::p_load(httr)
+  pacman::p_load(rjson)
+
+  # search for file private/public status
+  GETurl <- paste0("https://api.osf.io/v2/files/", GUID)
+  tempfile <- tempfile()
+  req <- GET(GETurl, write_disk(tempfile, overwrite = T))
+  json_data <- fromJSON(file = tempfile)
+
+  if (length(json_data$data) > 0) {
+    req1 <- GET(
+      json_data$data$links$download,
+      write_disk(file_name, overwrite = TRUE)
+    )
+    print(paste0(
+      "The file has been downloaded to your working directory as: ",
+      file_name
+    ))
+  } else if (length(Access_Token) == 1) {
+    if (grepl("https://osf.io", Access_Token) == TRUE) {
+      req1 <- GET(
+        paste0("https://api.osf.io/v2/files/", GUID, "/", gsub(".*/", "", Access_Token)),
+        write_disk(tempfile, overwrite = TRUE)
+      )
+      json_data <- fromJSON(file = tempfile)
+      if (length(json_data$data) > 0) {
+        req1 <- GET(
+          json_data$data$links$download,
+          write_disk(file_name, overwrite = TRUE)
+        )
+        print(paste0(
+          "The file has been downloaded to your working directory as: ",
+          file_name
+        ))
+      } else {
+        print(json_data$errors[[1]]$detail[1])
+      }
+    } else if (grepl("https://osf.io", Access_Token) == FALSE) {
+      req1 <- GET(
+        paste0("https://api.osf.io/v2/files/", GUID),
+        write_disk(tempfile, overwrite = TRUE),
+        add_headers("Authorization" = paste0("Bearer ", Access_Token))
+      )
+      json_data <- fromJSON(file = tempfile)
+      if (length(json_data$data) > 0) {
+        req1 <- GET(
+          json_data$data$links$download,
+          write_disk(file_name, overwrite = TRUE),
+          add_headers("Authorization" = paste0("Bearer ", Access_Token))
+        )
+        print(paste0(
+          "The file has been downloaded to your working directory as: ",
+          file_name
+        ))
+      } else {
+        print(json_data$errors[[1]]$detail[1])
+      }
+    } else {
+      print(json_data$errors[[1]]$detail[1])
+    }
+  } else {
+    print(json_data$errors[[1]]$detail[1])
+  }
+}

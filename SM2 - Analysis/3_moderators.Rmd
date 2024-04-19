@@ -610,8 +610,8 @@ if (file.exists("data/single_cat_moderator_tests.qs")) {
   qs::qsave(single_cat_moderator_tests, "data/single_cat_moderator_tests.qs")
 }
 
-if (file.exists("data/single_cont_moderator_tests.rds")) {
-  single_cont_moderator_tests <- read_rds("data/single_cont_moderator_tests.rds")
+if (file.exists("data/single_cont_moderator_tests.qs")) {
+  single_cont_moderator_tests <- qs::qread("data/single_cont_moderator_tests.qs")
   if (any(names(single_cont_moderator_tests) != cont_moderators)) {
     warning("File on disk does not match current list of moderators. Consider deleting it to re-estimate.")
   }
@@ -621,7 +621,7 @@ if (file.exists("data/single_cont_moderator_tests.rds")) {
       set_names() %>%
       map(\(moderator) single_cont_moderator_test(moderator, dataset))
   })
-  write_rds(single_cont_moderator_tests, "data/single_cont_moderator_tests.rds")
+  qs::qsave(single_cont_moderator_tests, "data/single_cont_moderator_tests.qs")
 }
 
 # Collapse countries so that there are at least 3 per group (otherwise, group estimates too noisy
@@ -768,8 +768,6 @@ if (!file.exists("data/mod_R2_equivalence.qs")) {
 } else {
   mod_R2s <- qs::qread("data/mod_R2_equivalence.qs")  
 }
-
-R2s <- read_rds("data/bs_R2s_objective_rater.rds")
 
 if (!file.exists("data/mod_R2_equivalence_expl.qs")) {
   job::job("Equivalence testing for exploratory moderator R2s" = {
@@ -1192,9 +1190,24 @@ pooled_Wald <- function(models, which_coefs) {
 ## Run meta-regression
 
 ```{r meta-regression}
+# Cannot save temp file on GitHub due to size
+# so instead can download it from the OSF
+# If you want to re-estimate the models, set this to false
+download_file <- TRUE
+
 if (file.exists("data/imp_meta_reg_mods.qs")) {
   imputed_mods <- qs::qread("data/imp_meta_reg_mods.qs")
 } else {
+  if (download_file == TRUE) {
+    download.OSF.file("49gzu", file_name = "data/imp_meta_reg_mods.qs")
+    imputed_mods <- try(qs::qread("data/imp_meta_reg_mods.qs"), silent = TRUE)
+    if (inherits(imputed_mods, "try-error")) {
+      message("Could not load imputed models - will re-impute.")
+    }
+  }
+  
+  if (inherits(imputed_mods, "try-error") | !download_file) {
+  
   if (!exists("imp")) stop("Imputation object (imp) not found - run/load imputation first.")
   job::job("Impute meta-regression" = {
     imp_datasets <- complete(imp, "all")
@@ -1247,7 +1260,7 @@ if (file.exists("data/imp_meta_reg_mods.qs")) {
     })
   })
  message("Models will be imputed now in background job - rerun this chunk afterwards to load them.")
-}
+}}
 ```
 
 ```{r meta-reg-pooling-testing, cache=TRUE}
