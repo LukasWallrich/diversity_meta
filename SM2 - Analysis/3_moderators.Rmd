@@ -5,7 +5,8 @@ output:
   html_document:
     theme: united
     toc: yes
-    code_folding: hide
+    toc_float: true
+    code_folding: hide    
 ---
 
 # Overview

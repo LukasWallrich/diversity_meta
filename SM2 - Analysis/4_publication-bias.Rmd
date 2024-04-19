@@ -5,12 +5,8 @@ output:
   html_document:
     theme: united
     toc: yes
+    toc_float: true
     code_folding: hide
-  pdf_document:
-    fig_height: 6
-    fig_width: 8
-  word_document: default
-Author: Lukas Wallrich 
 ---
 
 ```{r setup, include=FALSE}
