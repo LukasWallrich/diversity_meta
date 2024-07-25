@@ -610,10 +610,11 @@ fig_dat <- dataset %>%
     arrange(share) %>% 
     filter(!is.na(sub_dom)) %>% 
     mutate(
+      sub_dom = if_else(sub_dom == "Ethnicity", "Race/ethnicity", sub_dom),
       group = factor(sub_dom, levels = c("Other", sub_dom[sub_dom != "Other"] %>% unique()))
-    )
-
-fig_dat %>% group_by(domain) %>% arrange(-share) %>% slice_head(n = 3) %>% select(domain, sub_dom, share)
+    ) 
+ 
+fig_dat %>% group_by(domain) %>% arrange(-share) %>% slice_head(n = 5) %>% select(domain, sub_dom, share) %>% gt() %>% fmt_percent(share) %>% tab_header(title = "Top 5 sub-domains by domain") %>% cols_label(sub_dom = "Sub-domain", share = "Share")
 
 fig_dat <- fig_dat %>% split(.$domain)
 
@@ -658,7 +659,7 @@ p <- dem + cog + job +
 plot_annotation(caption = glue::glue("NB: Share missing to 100% are measures that combine sub-domains\n
 ({fmt_pct(1 - sum(fig_dat$Demographic$share))} for Demographic, very rare in others.)"))
 
-ggsave("figures/sub-domains.png", p, width = 18, units = "cm")
+ggsave("figures/sub-domains.png", p, width = 14, height = 10, units = "cm")
  
 p
 ```
