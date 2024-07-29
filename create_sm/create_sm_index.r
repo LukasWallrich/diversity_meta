@@ -1,7 +1,7 @@
 # Nested list of reports
 report_files <- list(
   "SM1: Search & Screening" = list(
-    "A: Details of Search Strategy" = c("SM1 - Search and Screening/SM 1A - Details on search strategy.pdf"), 
+    "A: Details of Search Strategy" = c("SM1 - Search and Screening/SM 1A - Details on search strategy.pdf"),
     "B: Benchmark of ASySD deduplication performance" = c("SM1 - Search and Screening/SM 1B - ASySD-benchmark.html"),
     "C: Screening process for refs from backward-chasing" = c("SM1 - Search and Screening/9---backwards-chasing-automated-screening.html"),
     "D: Exclusions for major risk of bias" = c("SM1 - Search and Screening/SM 1D - Exclusions.pdf"),
@@ -41,9 +41,7 @@ generate_html <- function(reports, base_path = "docs/") {
           } else {
             # Local file
             target_path <- file.path(base_path, basename(file_path))
-            if (!file.exists(target_path)) {
-              file.copy(file_path, target_path, overwrite = TRUE)
-            }
+            file.copy(file_path, target_path, overwrite = TRUE)
             sub_reports_html <- paste(sub_reports_html, sprintf('<a class="dropdown-item" href="%s" target="reportFrame">%s</a>', basename(file_path), sub_name), sep="\n")
           }
         }
