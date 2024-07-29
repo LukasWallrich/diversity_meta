@@ -367,11 +367,16 @@ single_cat_moderator_test <- function(moderator, data, min_group_k = FALSE) {
   } else {
     # Some levels did not exist in all domains - in these cases, need to match by coefficient names
     for (d in unique(data$domain)) {
+      if (sum(str_detect(names(coef(mod$mod_domains_no_int)), d)) > 1) { 
+        # To allow to test domains themselves with this function
       res_tibble <- bind_rows(res_tibble, Wald_test(mod$mod_domains_no_int,
         vcov = "CR2",
         constrain_equal(which(str_detect(names(coef(mod$mod_domains_no_int)), d)), coef(mod$mod_domains_no_int))
       ) %>%
         mutate(domain = d))
+      } else {
+        res_tibble
+      }
       p()
     }
   }
@@ -434,15 +439,15 @@ single_cont_moderator_test <- function(moderator, data) {
   )
 }
 
-cat_plots <- function(cats, minimum_articles = NULL, data = dataset) {
-  minart <- minimum_articles # Workaround a promise evaluation error
-  imap(cats, \(res, predictor_name, minimum_articles = minart) {
+cat_plots <- function(cats, minimum_samples = NULL, data = dataset) {
+  minart <- minimum_samples # Work around a promise evaluation error
+  imap(cats, \(res, predictor_name, minimum_samples = minart) {
     all_coefs <- bind_rows(
       res$robu_domain_no_int %>% tibble(),
       res$robu_averages %>% tibble()
     )
 
-    if (!is.null(minimum_articles)) {
+    if (!is.null(minimum_samples)) {
       dataset_articles <- data %>%
         group_by(articlestudy, !!sym(predictor_name)) %>%
         slice_head(n = 1) %>%
@@ -455,7 +460,7 @@ cat_plots <- function(cats, minimum_articles = NULL, data = dataset) {
 
       out_overall <- setdiff(
         all_vals,
-        dataset_articles[[predictor_name]] %>% table() %>% as_tibble() %>% filter(n >= minimum_articles) %>% pull(1)
+        dataset_articles[[predictor_name]] %>% table() %>% as_tibble() %>% filter(n >= minimum_samples) %>% pull(1)
       ) %>% paste0(predictor_name, .)
 
       dataset_articles <- data %>%
@@ -466,19 +471,19 @@ cat_plots <- function(cats, minimum_articles = NULL, data = dataset) {
       out_dem <- setdiff(
         all_vals,
         dataset_articles %>% filter(domain == "Demographic") %>% .[[predictor_name]] %>% table() %>%
-          as_tibble() %>% filter(n >= minimum_articles) %>% pull(1)
+          as_tibble() %>% filter(n >= minimum_samples) %>% pull(1)
       ) %>% paste0("domainDemographic:", predictor_name, .)
 
       out_job <- setdiff(
         all_vals,
         dataset_articles %>% filter(domain == "Job-related") %>% .[[predictor_name]] %>% table() %>%
-          as_tibble() %>% filter(n >= minimum_articles) %>% pull(1)
+          as_tibble() %>% filter(n >= minimum_samples) %>% pull(1)
       ) %>% paste0("domainJob-related:", predictor_name, .)
 
       out_cog <- setdiff(
         all_vals,
         dataset_articles %>% filter(domain == "Cognitive") %>% .[[predictor_name]] %>% table() %>%
-          as_tibble() %>% filter(n >= minimum_articles) %>% pull(1)
+          as_tibble() %>% filter(n >= minimum_samples) %>% pull(1)
       ) %>% paste0("domainCognitive:", predictor_name, .)
 
       all_out <- c(out_overall, out_dem, out_job, out_cog)
@@ -487,40 +492,46 @@ cat_plots <- function(cats, minimum_articles = NULL, data = dataset) {
     }
 
     cur_levels <- level_names %>% filter(var == predictor_name)
+df_preprocessed <- all_coefs %>%
+  mutate(domain = coalesce(str_extract(Coef, "domain[^:]+") %>% str_remove("domain"), "**Overall**"),
+         Coef = str_remove(Coef, paste0(".*", predictor_name))) %>% 
+  select(coef = Coef, beta = beta, se = SE, df = df_Satt, p = p_Satt, domain)
 
-    df_preprocessed <- all_coefs %>%
-      mutate(
-        domain = coalesce(str_extract(Coef, "domain[^:]+") %>% str_remove("domain"), "**Overall**"),
-        Coef = str_remove(Coef, paste0(".*", predictor_name))
-      ) %>%
-      select(coef = Coef, beta = beta, se = SE, df = df_Satt, p = p_Satt, domain)
+if (nrow(cur_levels) > 0) {
+  df_preprocessed <- df_preprocessed %>%
+    rowwise() %>%
+    mutate(coef = cur_levels$level_new[cur_levels$level_old == coef] %>% factor(levels = rev(cur_levels$level_new))) %>%
+    ungroup()
+}
 
-    if (nrow(cur_levels) > 0) {
-      df_preprocessed <- df_preprocessed %>%
-        rowwise() %>%
-        mutate(coef = cur_levels$level_new[cur_levels$level_old == coef] %>% factor(levels = rev(cur_levels$level_new))) %>%
-        ungroup()
-    }
+df_preprocessed <- df_preprocessed %>%
+  mutate(y = as.numeric(factor(paste(domain, coef))),
+         ci_label = paste(fmt_cor(beta), fmt_ci(beta - 1.96 * se, beta + 1.96 * se, drop_0 = TRUE)))
 
-    p <- ggplot(df_preprocessed, aes(y = coef, x = beta, color = domain)) +
-      geom_point() +
-      geom_errorbarh(aes(xmin = beta - 1.96 * se, xmax = beta + 1.96 * se), height = 0.2) +
-      geom_vline(xintercept = 0, linetype = "dashed", linewidth = .5) +
-      geom_vline(xintercept = c(-.1, .1), linetype = "dotted", linewidth = .5) +
-      facet_wrap(~domain, scales = "free_y", ncol = 1) +
-      theme_minimal() +
-      labs(
-        x = "", y = "",
-        subtitle = var_names$new[var_names$old == predictor_name]
-      ) +
-      theme(
-        axis.text.y = element_text(angle = 0, hjust = 1),
-        strip.text = element_markdown()
-      ) +
-      scale_color_brewer(palette = "Set1") +
-      scale_fill_brewer(palette = "Set1") +
-      theme(legend.position = "none")
-    list(plot = p, coefs = df_preprocessed)
+
+# Create the plot with annotations and secondary y-axis labels
+p <- ggplot(df_preprocessed, aes(y = y, x = beta, color = domain)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = beta - 1.96 * se, xmax = beta + 1.96 * se), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", linewidth = .5) +
+  geom_vline(xintercept = c(-.1, .1), linetype = "dotted", linewidth = .5) +
+  facet_wrap(~domain, scales = "free_y", ncol = 1) +
+  theme_minimal() +
+  labs(x = "", y = "",
+       subtitle = var_names$new[var_names$old == predictor_name]) +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1, size = rel(1)),
+        strip.text = element_markdown()) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none",
+        axis.text.y.right = element_text(hjust = 1)) +
+  scale_y_continuous(
+    breaks = df_preprocessed$y,
+    labels = df_preprocessed$coef,
+    sec.axis = sec_axis(~ ., breaks = df_preprocessed$y, labels = df_preprocessed$ci_label)
+  )
+
+list(plot = p, coefs = df_preprocessed)
   })
 }
 
@@ -680,6 +691,17 @@ ks <- single_cat_moderator_tests %>%
   mutate(moderator = var_names$new[var_names$old == moderator]) %>%
   ungroup()
 
+Ns <- map_dfr(c(cat_moderators, cont_moderators, expl_mods), function(mod) {
+  dataset %>%
+    filter(!is.na(!!rlang::sym(mod))) %>%
+    distinct(articlestudy) %>% 
+    summarise(moderator = mod, Ns = n())
+}) %>%
+  rowwise() %>% 
+  mutate(moderator = var_names$new[var_names$old == moderator]) %>%
+  select(moderator, Ns)
+
+
 ```
 
 The code to bootstrap R2s for the moderators (for equivalence testing) is very slow - it takes about 7-8 hours per moderator on an M2 Macbook Air. Therefore, it was run on AWC EC2 instances. The code used is found in `helpers/aws_code R2.R` but based on the code provided for reference below.
@@ -809,7 +831,8 @@ mod_table <- bind_rows(cat_summary %>% select(moderator, p_val, domain),
     select(-p_val) %>% 
   pivot_wider(names_from = "domain", values_from = "p_fmt") %>% 
   left_join(ks, by = "moderator") %>% 
-  transmute(Moderator = moderator, k, Overall, Demographic, Cognitive, `Job-related`, 
+  left_join(Ns, by = "moderator") %>%
+  transmute(Moderator = moderator, Ns, k, Overall, Demographic, Cognitive, `Job-related`, 
             `R<sup>2</sup>` = glue::glue("{round_(R2, 2)}% {R2_ci}"), `R<sup>2</sup> < 5%` = fmt_p(p_equiv, equal_sign = FALSE)) %>% 
   gt::gt() %>% 
   tab_header(title = "Univariate moderator tests") %>% 
@@ -827,27 +850,33 @@ mod_table
 
 ```{r moderator-plots-cat, fig.height=13, fig.width=9}
 
-sig_mods <- c(single_cat_moderator_tests[c(1, 3, 7, 5)], single_expl_cat_moderator_tests[7], single_expl_cat_moderator_tests[2])
-many_cats <- single_expl_cat_moderator_tests[c(1, 5)]
+sig_mods <- c(single_cat_moderator_tests[c(1, 3, 7, 5)], single_expl_cat_moderator_tests[7], single_expl_cat_moderator_tests[2])[c(3, 1, 6, 2, 4, 5)]
+
+many_cats <- single_expl_cat_moderator_tests[c(1, 4, 5)]
+
+many_cats[[2]]$robu_domain_no_int <- many_cats[[2]]$robu_domain_no_int %>% mutate(Coef = str_replace(Coef, "Professional services.*", "Professional services"))
+
+many_cats[[2]]$robu_averages <- many_cats[[2]]$robu_averages %>% mutate(Coef = str_replace(Coef, "Professional services.*", "Professional services"))
+
 
 ns_mods <- c(single_cat_moderator_tests[c(2, 4, 6, 8)], single_expl_cat_moderator_tests[3])
 
-main_plots <- cat_plots(sig_mods)
-tall_plots <- cat_plots(many_cats, minimum_articles = 5)
-ns_plots <- cat_plots(ns_mods, minimum_articles = 5)
+main_plots <- cat_plots(sig_mods, minimum_samples = 5)
+tall_plots <- cat_plots(many_cats, minimum_samples = 5)
+ns_plots <- cat_plots(ns_mods, minimum_samples = 5)
   
-p <- wrap_plots(map(main_plots, "plot"), tag_level = "new") +
+p <- wrap_plots(map(main_plots, "plot"), tag_level = "new", heights = c(1, 2)) +
   plot_annotation(tag_levels = 'A', title = "Estimated correlations depending on moderator levels",
                   subtitle = "Estimated from univariate meta-regressions with cluster-robust standard errors",
                   caption = "95% confidence intervals shown with error bars. Dotted lines indicate thresholds for small effects (|r| < .1).")
 
 p2 <- wrap_plots(map(tall_plots, "plot"), tag_level = "new") +
-  plot_annotation(tag_levels = list(c('G', 'H')), title = "Estimated correlations depending on moderator levels",
+  plot_annotation(tag_levels = list(c('K', 'L', 'M')), title = "Estimated correlations depending on moderator levels",
                   subtitle = "Estimated from univariate meta-regressions with cluster-robust standard errors",
                   caption = "95% confidence intervals shown with error bars. Dotted lines indicate thresholds for small effects (|r| < .1).\nLevels (and domain-level combinations) based on fewer than 5 samples are not shown.")
 
 p3 <- wrap_plots(map(ns_plots, "plot"), tag_level = "new") +
-  plot_annotation(tag_levels = list(LETTERS[9:(9+length(ns_plots))]), title = "Estimated correlations for non-significant moderators (in SM)",
+  plot_annotation(tag_levels = list(LETTERS[(which(LETTERS == "L") + 1):(which(LETTERS == "L")+1 + length(ns_plots))]), title = "Estimated correlations for non-significant moderators (in SM)",
                   subtitle = "Estimated from univariate meta-regressions with cluster-robust standard errors",
                   caption = "95% confidence intervals shown with error bars. Dotted lines indicate thresholds for small effects (|r| < .1).\nLevels (and domain-level combinations) based on fewer than 5 samples are not shown.")
 
@@ -856,18 +885,22 @@ coefs <- bind_rows(main_plots %>% map_dfr("coefs", .id = "moderator"),
                    ns_plots %>% map_dfr("coefs", .id = "moderator")) %>% select(moderator, domain, everything()) %>% 
   rowwise() %>% mutate(moderator = var_names$new[var_names$old == moderator]) %>% ungroup()
 
-ggsave("figures/moderated_estimates_cat.png", p, width = 9, height = 13)
+ggsave("figures/moderated_estimates_cat.png", p, width = 13, height = 9)
 ggsave("figures/moderated_estimates_tall.png", p2, width = 9, height = 11)
 
-p
-p2
-p3
+first_nna <- function(x) {
+  x %>% na.omit() %>% .[1]
+}
 
 coefs %>% 
   rename(`*r*` = beta, SE = se, zdf = df, `zz*p*` = p) %>%
   pivot_wider(names_from = "domain", values_from = c(`*r*`, SE, zdf, `zz*p*`), names_glue = "{domain}_{.value}") %>%
+  select(-y, -ci_label) %>%
+  group_by(moderator, coef) %>% 
+  summarise(across(everything(), first_nna), .groups = "drop") %>% 
+  select(moderator, coef, sort(names(.))) %>%  
   group_by(moderator) %>% 
-  select(moderator, coef, sort(names(.))) %>%  gt()  %>% 
+  gt()  %>% 
   tab_spanner_delim("_") %>% 
   cols_label(coef = "") %>% 
   cols_label(.list = stats::setNames(lapply(unlist(.$`_boxhead`$column_label), 
@@ -876,14 +909,14 @@ coefs %>%
   fmt(columns = matches(fixed("*p*")), fns = \(x) fmt_p(x, equal_sign = FALSE)) %>% 
   fmt_number(columns = matches("df"), decimals = 0) %>% 
   fmt_number(columns = matches("SE"), decimals = 2)  %>%
+  sub_missing() %>% 
   gt_apa_style() %>% 
   cols_align("right", coef) %>% 
   tab_header(title = "Estimated correlations for categorical moderator levels") %>% 
-  tab_source_note("NB: *df* are adjusted to robustly account for clustering, they do not indicate the number of observations. NA are shown where there were insufficient observations to estimate that value.")
+  tab_source_note("NB: *df* are adjusted to robustly account for clustering, they do not indicate the number of observations. '---' are shown where there were insufficient observations to estimate that value.")
 ```
 
 ```{r moderator-plots-cont, fig.height=13, fig.width=9}
-
 predict_robust <- function(mod, moderator, include_domains = FALSE) {
   # From Viechtbauer - https://stat.ethz.ch/pipermail/r-sig-meta-analysis/2021-October/003516.html
 
@@ -985,17 +1018,89 @@ BBBBBBBBEDDDD
 CCCCCCCCEDDDD
 ")
 
-p <- ps[[1]] + ps[[2]] + ps[[3]] + 
-  (tall_plots[[2]]$plot + labs(caption = "Only functions investigated in at least 5 samples are shown.")) + 
+pa <- ps[[1]] + ps[[2]] + ps[[3]] + 
+  (tall_plots[[3]]$plot) + 
   plot_spacer() + plot_layout(design = layout) + 
   plot_annotation(tag_levels = list(c('G', 'H', "I", "J")), title = "Estimated correlations depending on moderator value",
                   subtitle = "Estimated from univariate meta-regressions with cluster-robust standard errors",
                   caption = "NB: Lengths of the regression line corresponds to observed range of the data.")
      
 ggsave("figures/moderated_estimates_cont.png", p, width = 9, height = 12)
+```
 
+```{r}
+domain_moderation <- single_cat_moderator_test("domain", dataset)
+
+sub_domain_moderation <- single_cat_moderator_test("domain_and_sub", dataset)
+
+coefs <- bind_rows(
+  domain_moderation$robu_averages,
+  sub_domain_moderation$robu_averages
+) %>% 
+  filter(!str_detect(Coef, "NA|other|intelligence")) %>% # Intelligence only investigated in 4 samples
+  mutate(label = if_else(
+    str_detect(Coef, "domain_"),
+    str_remove(Coef, "domain_and_sub[A-Za-z-]* ") %>% str_to_title(),
+    str_remove(Coef, "domain") %>% paste0("***", ., "***")
+  ),
+  domain = Coef %>% 
+    str_remove("domain_and_sub") %>% 
+    str_remove("domain") %>% 
+    str_split(" ") %>% map_chr(1)) %>% 
+  arrange(domain)
+
+df_preprocessed <- coefs %>%
+  rename(se = SE) %>% 
+  mutate(y = rev(row_number()),
+         ci_label = paste(fmt_cor(beta), fmt_ci(beta - 1.96 * se, beta + 1.96 * se, drop_0 = TRUE)),
+         alpha_val = if_else(str_detect(label, "\\*"), 1, 0.99)) 
+  
+
+
+# Create the plot with annotations and secondary y-axis labels
+p4 <- ggplot(df_preprocessed, aes(y = y, x = beta, color = domain, alpha = alpha_val)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = beta - 1.96 * se, xmax = beta + 1.96 * se), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", linewidth = .5) +
+  geom_vline(xintercept = c(-.1, .1), linetype = "dotted", linewidth = .5) +
+  theme_minimal() +
+  labs(x = "", y = "",
+       subtitle = "Domain and sub-domain") +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none",
+        axis.text.y.right = element_text(hjust = 1),
+        axis.text.y.left = element_markdown(),
+        plot.caption = element_markdown()) +
+  scale_y_continuous(
+    breaks = df_preprocessed$y,
+    labels = df_preprocessed$label,
+    sec.axis = sec_axis(~ ., breaks = df_preprocessed$y, labels = df_preprocessed$ci_label)
+  ) +
+  scale_alpha_continuous(range = c(.6, 1))
+
+ggsave("figures/domain_results.jpg", p4, width = 10, height = 4)
+
+```
+
+
+```{r moderator-plots-cont2, fig.height=13, fig.width=18}
 p
+```
 
+```{r moderator-plots-cont3, fig.height=18, fig.width=13}
+pa
+```
+
+
+```{r moderator-plots-cont4, fig.height=18, fig.width=13}
+p2
+p3
+```
+
+
+```{r moderator-plots-cont5, fig.height=4, fig.width=10}
+p4
 ```
 
 # Meta-regression
