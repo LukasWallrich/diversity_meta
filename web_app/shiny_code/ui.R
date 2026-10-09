@@ -286,10 +286,11 @@ fluidRow(h4("Collectivism"),
           tableOutput("heterogeneity") %>% shinycssloaders::withSpinner()
         ),
         tabPanel("About", HTML("<h3>Interactive multiverse meta-analysis of diversity and team performance </h3>
-<br/><br/><b>Last Update:</b> 17 Apr 2024
-<br/><br/><b>Citation:</b> To be added after peer review
-<br/><br/><b>Data and materials:</b> <a href=https://anonymous.4open.science/r/diversity_meta-5DC0>https://anonymous.4open.science/r/diversity_meta-5DC0</a>
-<br/><br/><b><b>Contact:</b> Contact us with suggestions or bug reports:</b> To be added after peer review
+<br/><br/><b>About section updated:</b> 9 Oct 2026
+<br/><br/><b>Citation:</b> Please cite the paper when using this app or its data:<br/>Wallrich, L., Opara, V., Wesołowska, M., Barnoth, D., &amp; Yousefi, S. (2024). The relationship between team diversity and team performance: Reconciling promise and reality through a comprehensive meta-analysis registered report. <em>Journal of Business and Psychology, 39</em>, 1303–1354. <a href='https://doi.org/10.1007/s10869-024-09977-0'>https://doi.org/10.1007/s10869-024-09977-0</a>
+<br/><br/><b>Read the paper:</b> <a href='https://doi.org/10.1007/s10869-024-09977-0'>Published article</a> | <a href='https://osf.io/nscd4/'>Open manuscript on OSF</a>
+<br/><br/><b>Data and materials:</b> <a href='https://github.com/LukasWallrich/diversity_meta'>https://github.com/LukasWallrich/diversity_meta</a>
+<br/><br/><b>Contact:</b> For suggestions or bug reports, contact Lukas Wallrich (<a href='mailto:l.wallrich@bbk.ac.uk'>l.wallrich@bbk.ac.uk</a>).
 <br/><br/><br/><br/> <b>Created with <a href='https://github.com/LukasWallrich/metaUI'> metaUI </a> </b> v0.1.2<br /> &nbsp;<br /> &nbsp;<br /> &nbsp; <h4>R packages used</h4><table style='display: inline-block;vertical-align:top;'><tr><th tyle='text-align: left;'>Package&nbsp;&nbsp;&nbsp;</th><th tyle='text-align: left;'>Version&nbsp;</th></tr>
 <tr><td>dplyr</td><td>1.1.2</td></tr>
 <tr><td>DT</td><td>0.33</td></tr>
