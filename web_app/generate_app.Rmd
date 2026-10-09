@@ -124,9 +124,9 @@ generate_shiny(shiny_data,
                # if you keep as is, you should get a popup to select it when running the code
                save_to_folder = "shiny_code",
                # Details to show on the about page - see ?create_about for all options
-               citation = "To be added after peer review",
-               contact = "To be added after peer review",
-               osf_link = "https://anonymous.4open.science/r/diversity_meta-5DC0",
+               citation = "Wallrich, L., Opara, V., Wesołowska, M., Barnoth, D., &amp; Yousefi, S. (2024). The relationship between team diversity and team performance: Reconciling promise and reality through a comprehensive meta-analysis registered report. <em>Journal of Business and Psychology, 39</em>, 1303–1354. <a href='https://doi.org/10.1007/s10869-024-09977-0'>https://doi.org/10.1007/s10869-024-09977-0</a><br/><br/><b>Read the paper:</b> <a href='https://doi.org/10.1007/s10869-024-09977-0'>Published article</a> | <a href='https://osf.io/nscd4/'>Open manuscript on OSF</a>",
+               contact = "Lukas Wallrich (<a href='mailto:l.wallrich@bbk.ac.uk'>l.wallrich@bbk.ac.uk</a>)",
+               osf_link = "https://github.com/LukasWallrich/diversity_meta",
                options = list(selection_list_threshold = 3,
                               shiny_theme = "journal")
                )
