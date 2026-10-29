@@ -1,6 +1,7 @@
  models_to_run <- tibble::tribble(
   ~name,                                             ~aggregated, ~es,                                  ~LCL,                  ~UCL,                  ~k,               
    "Random-Effects Multilevel Model",                 FALSE,       "mod$b",                              "mod$ci.lb",           "mod$ci.ub",           "mod$k",         
+   "Correlated and Hierarchical Effects Model (as in paper)", FALSE, "mod$b",                         "mod$ci.lb",           "mod$ci.ub",           "mod$k",         
    "Robust Variance Estimation",                      FALSE,       "as.numeric(mod$reg_table$b.r)",      "mod$reg_table$CI.L",  "mod$reg_table$CI.U",  "length(mod$k)", 
    "Trim-and-fill",                                   TRUE,        "mod$TE.random",                      "mod$lower.random",    "mod$upper.random",    "mod$k",         
    "P-uniform star",                                  TRUE,        "mod$est",                            "mod$ci.lb",           "mod$ci.ub",           "mod$k",         
@@ -21,6 +22,18 @@
                                 method = \"REML\",
                                 sparse = TRUE
                             )",                                                                                                                                                                                                                                                                                                                                                      
+   "Correlated and Hierarchical Effects Model (as in paper)", "metafor::rma.mv(
+                                yi = metaUI__effect_size,
+                                # Sampling errors of effects from the same study assumed to correlate at .6
+                                V = metafor::vcalc(vi = metaUI__variance, cluster = metaUI__study_id,
+                                                   obs = metaUI__effect_id, rho = 0.6, data = df),
+                                random = ~ 1 | metaUI__study_id/metaUI__effect_id,
+                                test = \"t\",
+                                dfs = \"contain\",
+                                data = df,
+                                method = \"REML\",
+                                sparse = TRUE
+                            )",
    "Robust Variance Estimation",                      "robumeta::robu(
                         metaUI__effect_size ~ 1, data = df,
                         studynum = metaUI__study_id, var.eff.size = metaUI__variance, small = FALSE)",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              

@@ -154,6 +154,8 @@ Changes made here:
 
 -   Multilevel models (summary, moderation, heterogeneity) nest effects within studies using a unique effect ID (`metaUI__effect_id`, added in `df_reactive`), as in the article's analysis, rather than the effect-size value, which merged identical effects within a study. `signif_floor()`/`signif_ceiling()` no longer round back towards zero, so the default z-score range includes all effects (previously 9 were excluded).
 
+-   `models.R` adds a Correlated and Hierarchical Effects Model that reproduces the article's main analysis (`metafor::vcalc()` with rho = .6, `test = "t"`, `dfs = "contain"`); the standard multilevel model with independent sampling errors is kept as the first row, and the summary note explains the difference.
+
 ToDos:
 
 -   [ ] Add SESOI selection and add that line into charts (consider specific testing)
