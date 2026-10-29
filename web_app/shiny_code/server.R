@@ -22,7 +22,7 @@
       min = signif_floor(min(metaUI__df$metaUI__es_z), z_sig_dig),
       max = signif_ceiling(max(metaUI__df$metaUI__es_z), z_sig_dig), value = c(
         signif_floor(min(metaUI__df$metaUI__es_z), z_sig_dig),
-        signif_ceiling(max(metaUI__df$metaUI__es_z, na.rm = TRUE))
+        signif_ceiling(max(metaUI__df$metaUI__es_z, na.rm = TRUE), z_sig_dig)
       ), sep = ""
     )
   )
@@ -114,6 +114,9 @@ df <- df[(df[['metaUI__filter_Collectivism']] >= input[['metaUI__filter_Collecti
 
     # Filter by zscore
     df <- df[df$metaUI__es_z >= input$outliers_z_scores[1] & df$metaUI__es_z <= input$outliers_z_scores[2], ]
+
+    # Unique ID for each effect size, used as the lower level in multilevel models
+    df$metaUI__effect_id <- seq_len(nrow(df))
     df
   })
 
@@ -749,7 +752,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
       model <- metafor::rma.mv(
         yi = metaUI__effect_size,
         V = metaUI__variance,
-        random = ~ 1 | metaUI__study_id/metaUI__effect_size,
+        random = ~ 1 | metaUI__study_id/metaUI__effect_id,
         tdist = TRUE,
         data = df,
         mods = as.formula(glue::glue("~`{input$moderator}`")),
@@ -767,7 +770,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
      model_sig <- metafor::rma.mv(
         yi = metaUI__effect_size,
         V = metaUI__variance,
-        random = ~ 1 | metaUI__study_id/metaUI__effect_size,
+        random = ~ 1 | metaUI__study_id/metaUI__effect_id,
         tdist = TRUE,
         data = df,
         mods = as.formula(glue::glue("~`{input$moderator}`")),
@@ -777,7 +780,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
      model <- metafor::rma.mv(
         yi = metaUI__effect_size,
         V = metaUI__variance,
-        random = ~ 1 | metaUI__study_id/metaUI__effect_size,
+        random = ~ 1 | metaUI__study_id/metaUI__effect_id,
         tdist = TRUE,
         data = df,
         mods = as.formula(glue::glue("~`{input$moderator}` - 1")),
@@ -848,7 +851,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
     metapp_total <- metafor::rma.mv(
       yi = metaUI__effect_size,
       V = metaUI__variance,
-      random = ~ 1 | metaUI__study_id/metaUI__effect_size,
+      random = ~ 1 | metaUI__study_id/metaUI__effect_id,
       tdist = TRUE, # knapp-hartung adjustment
       data = df,
       method = "ML", # REML failed to converge in tests

@@ -15,7 +15,7 @@
    "Random-Effects Multilevel Model",                 "metafor::rma.mv(
                                 yi = metaUI__effect_size,
                                 V = metaUI__variance,
-                                random = ~ 1 | metaUI__study_id/metaUI__effect_size,
+                                random = ~ 1 | metaUI__study_id/metaUI__effect_id,
                                 tdist = TRUE, # knapp-hartung adjustment
                                 data = df,
                                 method = \"REML\",

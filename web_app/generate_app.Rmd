@@ -152,6 +152,8 @@ Changes made here:
 
 -   Fixed defects in the generated code: the hidden dataset download link is kept active (`suspendWhenHidden = FALSE`) so "Download dataset" works; the z-score slider sits in a plain `div` rather than an empty `uiOutput`; uploads without a file, failing p-/z-curves and selections without outliers show messages instead of errors; Egger's table shows tau²; label, rounding and typo fixes.
 
+-   Multilevel models (summary, moderation, heterogeneity) nest effects within studies using a unique effect ID (`metaUI__effect_id`, added in `df_reactive`), as in the article's analysis, rather than the effect-size value, which merged identical effects within a study. `signif_floor()`/`signif_ceiling()` no longer round back towards zero, so the default z-score range includes all effects (previously 9 were excluded).
+
 ToDos:
 
 -   [ ] Add SESOI selection and add that line into charts (consider specific testing)

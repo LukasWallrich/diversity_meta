@@ -1,22 +1,13 @@
 # Ensure this is aligned in /R and /inst as it is used by both this package and the Shiny apps. Locally ensured with git pre-commit hook
 
-# Function to round numbers up and down to a given number of significant digits
+# Functions to round numbers up and down to a given number of decimal places
+# (so that slider ranges always include the most extreme values)
 signif_ceiling <- function(x, digits = 2) {
-  if (x == 0) {
-    return(0)
-  }
-  else {
-    return(signif(ceiling(x * 10^digits) / 10^digits, digits))
-  }
+  ceiling(x * 10^digits) / 10^digits
 }
 
 signif_floor <- function(x, digits = 2) {
-  if (x == 0) {
-    return(0)
-  }
-  else {
-    return(signif(floor(x * 10^digits) / 10^digits, digits))
-  }
+  floor(x * 10^digits) / 10^digits
 }
 
 #' Format p-value in line with APA standard (no leading 0)
