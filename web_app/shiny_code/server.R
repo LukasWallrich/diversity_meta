@@ -225,7 +225,7 @@ df <- df[(df[['metaUI__filter_Collectivism']] >= input[['metaUI__filter_Collecti
       ~Sources, ~Studies,
       ~Effects, ~`Sample size`,
       length(unique(df$metaUI__article_label)), length(unique(df$metaUI__study_id)),
-      length(df$metaUI__study_id), sum(aggregate(metaUI__N ~ metaUI__study_id, data = df, FUN = "min")$metaUI__N) %>% round()
+      length(df$metaUI__study_id), sum(aggregate(metaUI__N ~ metaUI__study_id, data = df, FUN = "min")$metaUI__N) %>% round() %>% as.integer()
     )
 
     if (overview$Sources == 0) {
@@ -569,7 +569,7 @@ output$`summary_metaUI__filter_Longevity_plot` <- renderPlot({
 })
   output$`summary_metaUI__filter_Power_distance_table` <- renderTable({ # { escapes the glue syntax
   df <- df_filtered()
-  summarise_numeric(df[['metaUI__filter_Power distance']], 'Power_distance')
+  summarise_numeric(df[['metaUI__filter_Power distance']], 'Power distance')
 })
 
 output$`summary_metaUI__filter_Power_distance_plot` <- renderPlot({
@@ -627,12 +627,14 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     out %>% DT::datatable(
       rownames = FALSE,
+      options = list(scrollX = TRUE),
       escape = setdiff(names(out), "Source"),
       caption = tags$caption(
         style = "caption-side: bottom; text-align: left; margin: 8px 0;",
         glue::glue("The effect size is given as {metaUI_eff_size_type_label}")
       )
-    )
+    ) %>%
+      DT::formatRound("Effect size", digits = 3)
   })
 
 
@@ -923,7 +925,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     eggers <- meta::metabias(meta_agg, k.min = 3, method.bias = "Egger")
     eggers_table <- data.frame(
-      "Intercept" = eggers$estimate, "Tau<sup>2</sup>" = eggers$tau,
+      "Intercept" = eggers$estimate, "Tau<sup>2</sup>" = eggers$tau^2,
       "t" = eggers$statistic,
       "p" = ifelse(round(eggers$p.value, 3) == 0, "< .001", round(eggers$p.value, 3)),
       check.names = FALSE
@@ -1073,6 +1075,8 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
       writexl::write_xlsx(data_list(), file)
     }
   )
+  # The download link is hidden, so it needs to stay active to be clicked via JS
+  outputOptions(output, "executeDownload", suspendWhenHidden = FALSE)
 
   observeEvent(input$downloadData, {
     if (state_values$ever_analyzed == TRUE) {

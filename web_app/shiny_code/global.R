@@ -118,7 +118,7 @@ if (!requireNamespace("zcurve", quietly = TRUE)) {
   source(file.path(f, 'dmetar_contributions.R'))
   server <- source(file.path(f, 'server.R')) %>% purrr::pluck('value')
   ui <- source(file.path(f, 'ui.R'))  %>% purrr::pluck('value')
-  metaUI_eff_size_type_label <- 'r (adjusted for attenutation)'
+  metaUI_eff_size_type_label <- 'r (adjusted for attenuation)'
   metaUI__df <- readRDS(file.path(f, 'dataset.rds'))
   # Full references for each source, built by ../build_references.R
   metaUI__references <- readRDS(file.path(f, 'references.rds'))

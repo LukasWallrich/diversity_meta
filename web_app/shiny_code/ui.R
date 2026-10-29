@@ -133,7 +133,7 @@ p("Collectivism",
   checkboxInput("metaUI__filter_Collectivism_include_NA",
   "Include missing values", value = TRUE),
 
-      uiOutput("z_score_filter")),
+      div(id = "z_score_filter")),
 
       tags$hr(),
       shinyjs::useShinyjs(),
@@ -293,7 +293,7 @@ fluidRow(h4("Collectivism"),
 <br/><br/><b>Read the paper:</b> <a href='https://doi.org/10.1007/s10869-024-09977-0'>Published article</a> | <a href='https://osf.io/nscd4/'>Open manuscript on OSF</a>
 <br/><br/><b>Data and materials:</b> <a href='https://github.com/LukasWallrich/diversity_meta'>https://github.com/LukasWallrich/diversity_meta</a>
 <br/><br/><b>Contact:</b> For suggestions or bug reports, contact Lukas Wallrich (<a href='mailto:l.wallrich@bbk.ac.uk'>l.wallrich@bbk.ac.uk</a>).
-<br/><br/><br/><br/> <b>Created with <a href='https://github.com/LukasWallrich/metaUI'> metaUI </a> </b> v0.1.2<br /> &nbsp;<br /> &nbsp;<br /> &nbsp; <h4>R packages used</h4><table style='display: inline-block;vertical-align:top;'><tr><th tyle='text-align: left;'>Package&nbsp;&nbsp;&nbsp;</th><th tyle='text-align: left;'>Version&nbsp;</th></tr>
+<br/><br/><br/><br/> <b>Created with <a href='https://github.com/LukasWallrich/metaUI'> metaUI </a> </b> v0.1.2<br /> &nbsp;<br /> &nbsp;<br /> &nbsp; <h4>R packages used</h4><table style='display: inline-block;vertical-align:top;'><tr><th style='text-align: left;'>Package&nbsp;&nbsp;&nbsp;</th><th style='text-align: left;'>Version&nbsp;</th></tr>
 <tr><td>dplyr</td><td>1.1.2</td></tr>
 <tr><td>DT</td><td>0.33</td></tr>
 <tr><td>ggplot2</td><td>3.4.2</td></tr>
@@ -303,7 +303,7 @@ fluidRow(h4("Collectivism"),
 <tr><td>plotly</td><td>4.10.4</td></tr>
 <tr><td>poibin</td><td>1.5</td></tr>
 <tr><td>puniform</td><td>0.2.7</td></tr></table>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-<table style='display: inline-block;vertical-align:top;'><tr><th tyle='text-align: left;'>Package&nbsp;&nbsp;&nbsp;</th><th tyle='text-align: left;'>Version&nbsp;</th></tr>
+<table style='display: inline-block;vertical-align:top;'><tr><th style='text-align: left;'>Package&nbsp;&nbsp;&nbsp;</th><th style='text-align: left;'>Version&nbsp;</th></tr>
 <tr><td>purrr</td><td>1.0.1</td></tr>
 <tr><td>readxl</td><td>1.4.3</td></tr>
 <tr><td>rlang</td><td>1.1.1</td></tr>
@@ -313,7 +313,7 @@ fluidRow(h4("Collectivism"),
 <tr><td>shinycssloaders</td><td>1.0.0</td></tr>
 <tr><td>shinyjs</td><td>2.1.0</td></tr>
 <tr><td>shinythemes</td><td>1.2.0</td></tr></table>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-<table style='display: inline-block;vertical-align:top;'><tr><th tyle='text-align: left;'>Package&nbsp;&nbsp;&nbsp;</th><th tyle='text-align: left;'>Version&nbsp;</th></tr>
+<table style='display: inline-block;vertical-align:top;'><tr><th style='text-align: left;'>Package&nbsp;&nbsp;&nbsp;</th><th style='text-align: left;'>Version&nbsp;</th></tr>
 <tr><td>shinyWidgets</td><td>0.8.4</td></tr>
 <tr><td>stringr</td><td>1.5.0</td></tr>
 <tr><td>tibble</td><td>3.2.1</td></tr>
