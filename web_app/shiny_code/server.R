@@ -802,7 +802,9 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
     df <- df_filtered()
     if (is.numeric(df[[input$moderator]])) {
       modtable <- psych::describe(df[input$moderator] %>% as.data.frame(), fast = TRUE) # [c(2:5, 8, 9)]
-      modtable[, 2:6] <- round_(as.data.frame(modtable)[, 2:6], digits = 2)
+      modtable <- as.data.frame(modtable)
+      stat_cols <- setdiff(names(modtable), c("vars", "n"))
+      modtable[stat_cols] <- lapply(modtable[stat_cols], round_, digits = 2)
       modtable <- modtable %>% dplyr::rename(k = n)
       modtable$Intercept <- round_(model$b[1], digits = 2)
       modtable$`&beta;` <- round_(model$b[2], digits = 2)
@@ -953,9 +955,11 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
         "n" = metaUI__N
       )
 
-    pcurve_estimates1 <- try(pcurve(pp_first, effect.estimation = FALSE, N = pp_first$n, dmin = 0, dmax = 1), silent = FALSE)
+    pcurve_estimates1 <- try(pcurve(pp_first, effect.estimation = FALSE, N = pp_first$n, dmin = 0, dmax = 1), silent = TRUE)
 
-    pcurve_estimates1 <- ifelse(substr(pcurve_estimates1, 1, 5) == "Error", 0, pcurve_estimates1)
+    shiny::validate(shiny::need(!inherits(pcurve_estimates1, "try-error"), paste(
+      "The p-curve could not be estimated for this selection:", conditionMessage(attr(pcurve_estimates1, "condition"))
+    )))
 
     pcurve_estimates1
   })
@@ -981,6 +985,10 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
     df_first$z <- abs(df_first$TE / df_first$seTE)
 
     zcurve_estimates1 <- try(zcurve::zcurve(df_first$z, bootstrap = FALSE), silent = TRUE)
+
+    shiny::validate(shiny::need(!inherits(zcurve_estimates1, "try-error"), paste(
+      "The z-curve could not be estimated for this selection:", conditionMessage(attr(zcurve_estimates1, "condition"))
+    )))
 
     zcurve::plot.zcurve(zcurve_estimates1, annotation = TRUE, main = "")
   })
@@ -1038,7 +1046,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     # Hide boxplot outliers so that they are not shown multiple times
     plotly_plot$x$data <- lapply(plotly_plot$x$data, FUN = function(x) {
-      if (x$type == "box") {
+      if (isTRUE(x$type == "box")) {
         x$marker <- list(opacity = 0)
       }
       return(x)
@@ -1093,7 +1101,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
   observeEvent(input$executeUpload, {
     state_values$to_upload <- TRUE
 
-    if (class(try(nrow(input$uploadData))) != "try-error") {
+    if (!is.null(input$uploadData)) {
       sheets <- readxl::excel_sheets(input$uploadData$datapath)
       if (!("dataset" %in% sheets && "filters" %in% sheets)) {
       showModal(modalDialog(title = "Invalid file", "The file needs to contain a dataset and a filters sheet. Typically, you should start from a file downloaded from this application."))
