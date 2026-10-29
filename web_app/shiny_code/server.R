@@ -960,9 +960,11 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     pcurve_estimates1 <- try(pcurve(pp_first, effect.estimation = FALSE, N = pp_first$n, dmin = 0, dmax = 1), silent = TRUE)
 
-    shiny::validate(shiny::need(!inherits(pcurve_estimates1, "try-error"), paste(
-      "The p-curve could not be estimated for this selection:", conditionMessage(attr(pcurve_estimates1, "condition"))
-    )))
+    if (inherits(pcurve_estimates1, "try-error")) {
+      shiny::validate(shiny::need(FALSE, paste(
+        "The p-curve could not be estimated for this selection:", conditionMessage(attr(pcurve_estimates1, "condition"))
+      )))
+    }
 
     pcurve_estimates1
   })
@@ -989,9 +991,11 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     zcurve_estimates1 <- try(zcurve::zcurve(df_first$z, bootstrap = FALSE), silent = TRUE)
 
-    shiny::validate(shiny::need(!inherits(zcurve_estimates1, "try-error"), paste(
-      "The z-curve could not be estimated for this selection:", conditionMessage(attr(zcurve_estimates1, "condition"))
-    )))
+    if (inherits(zcurve_estimates1, "try-error")) {
+      shiny::validate(shiny::need(FALSE, paste(
+        "The z-curve could not be estimated for this selection:", conditionMessage(attr(zcurve_estimates1, "condition"))
+      )))
+    }
 
     zcurve::plot.zcurve(zcurve_estimates1, annotation = TRUE, main = "")
   })
