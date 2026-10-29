@@ -17,6 +17,7 @@
      # Confidence level needs to be changed in all entries in model.R if you want to adjust it
     summary_table_notes <- HTML(glue::glue("<i>Notes:</i> LCL = Lower <<ci_width>> Confidence Limit, UCL = Upper <<ci_width>> Confidence Limit, k = number of effects.", .open = "<<", .close = ">>"))
 
+    sample_references_main <- HTML("<br/><h3>Studies in this Selection</h3>")
     sample_overview_main <- HTML("<br/><br/><h3>Sample Breakdown</h3>") # <b></b>
     sample_table <- HTML("<br/><br/><h3>List of Effect Sizes</h3>") # <b></b>
     sample_moderation_main <- HTML("<br/><br/><h3>Simple tests of moderation</h3>") # <b></b>

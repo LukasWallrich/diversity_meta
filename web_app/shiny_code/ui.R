@@ -167,6 +167,8 @@ p("Collectivism",
         ),
         tabPanel(
           "Sample",
+          sample_references_main,
+          uiOutput("reference_downloads"),
           sample_overview_main,
           fluidRow(h4("Domain"),
   div(column(4, tableOutput("summary_metaUI__filter_Domain_table")),

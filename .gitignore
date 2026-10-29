@@ -26,3 +26,6 @@ retractions.csv
 bw_chasing_data
 temp_data
 imp_meta_reg_mods.qs
+
+# shinyapps.io deployment credentials
+.shinyapps.env

@@ -601,30 +601,33 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
   output$sample_table <- DT::renderDataTable({
     df <- df_filtered()
 
+    # Source: citation as in the article, with a link icon to the DOI or URL
+    link_icon <- as.character(icon("up-right-from-square"))
+    source_html <- function(citation, link) {
+      ifelse(is.na(link), htmltools::htmlEscape(citation), paste0(
+        htmltools::htmlEscape(citation), ' <a href="', htmltools::htmlEscape(link, attribute = TRUE),
+        '" target="_blank" rel="noopener" title="Open publication">', link_icon, "</a>"
+      ))
+    }
+
     out <- df %>%
-      dplyr::select(dplyr::any_of("metaUI__article_label"),
-        Study =
-          "metaUI__study_id", N = "metaUI__N",
-        "Effect size" = "metaUI__effect_size", p = "metaUI__pvalue",
-        dplyr::starts_with("metaUI__filter_"), dplyr::any_of("metaUI__url")
+      dplyr::mutate(
+        Source = source_html(dplyr::coalesce(metaUI__citation, metaUI__article_label), metaUI__link),
+        Study = stringr::str_remove(metaUI__study_id, stringr::fixed(metaUI__article_label)) %>%
+          stringr::str_remove("^[[:punct:] ]+")
       ) %>%
-      dplyr::rename_with(~ stringr::str_replace(.x, "metaUI__filter_", "") %>%
-        stringr::str_replace("metaUI__article_label", "Source") %>%
-        stringr::str_replace("metaUI__url", "URL")) %>%
-      dplyr::mutate(p = fmt_p(p, include_equal = FALSE)) %>%
-      dplyr::arrange(.data$Study)
-
-    if ("Source" %in% names(out)) {
-      out <- out %>% dplyr::mutate(Study = stringr::str_remove(Study, Source) %>%
-        stringr::str_remove("^[[:punct:] ]+"))
-    }
-
-    if ("URL" %in% names(out)) {
-      out <- out %>% dplyr::mutate(URL = glue::glue("<a href={URL}>{URL}</a>"))
-    }
+      # Sort by surname, ignoring initials added to distinguish authors
+      dplyr::arrange(tolower(stringr::str_remove(metaUI__citation, "^([A-Z][a-z]?\\.(-[A-Z]\\.)? ?)+")), Study) %>%
+      dplyr::select("Source", "Study", N = "metaUI__N",
+        "Effect size" = "metaUI__effect_size", p = "metaUI__pvalue",
+        dplyr::starts_with("metaUI__filter_")
+      ) %>%
+      dplyr::rename_with(~ stringr::str_replace(.x, "metaUI__filter_", "")) %>%
+      dplyr::mutate(p = fmt_p(p, include_equal = FALSE))
 
     out %>% DT::datatable(
       rownames = FALSE,
+      escape = setdiff(names(out), "Source"),
       caption = tags$caption(
         style = "caption-side: bottom; text-align: left; margin: 8px 0;",
         glue::glue("The effect size is given as {metaUI_eff_size_type_label}")
@@ -632,6 +635,76 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
     )
   })
 
+
+
+  # References for current selection ---------------------------------------
+
+  selected_references <- reactive({
+    df <- df_filtered()
+
+    df %>%
+      dplyr::count(metaUI__article_label, name = "Effect sizes") %>%
+      dplyr::left_join(metaUI__references, by = "metaUI__article_label") %>%
+      dplyr::mutate(
+        citation = dplyr::coalesce(citation, metaUI__article_label),
+        reference = dplyr::coalesce(reference, paste0(citation, " [Full reference not available]"))
+      ) %>%
+      dplyr::arrange(tolower(reference))
+  })
+
+  output$reference_downloads <- renderUI({
+    if (input$go == 0) {
+      return(helpText("Click on Analyze data to list the sources in your selection."))
+    }
+    refs <- selected_references()
+    tagList(
+      p(glue::glue("Your current selection draws on {nrow(refs)} sources ",
+        "({sum(refs$`Effect sizes`)} effect sizes). Download their references:")),
+      downloadButton("download_references_txt", "Reference list (.txt)"),
+      downloadButton("download_references_bib", "BibTeX (.bib)"),
+      downloadButton("download_references_xlsx", "Table with source IDs (.xlsx)"),
+      helpText("References are updated each time you click on Analyze data. They follow the reference list of the article; ",
+        "where that list is wrong, the corrected reference is given with a note.")
+    )
+  })
+
+  references_filename <- function(ext) {
+    function() paste0(Sys.Date(), "-", gsub(" ", "_", dataset_name), "-references.", ext)
+  }
+
+  output$download_references_txt <- downloadHandler(
+    filename = references_filename("txt"),
+    content = function(file) {
+      refs <- selected_references()
+      header <- c(
+        glue::glue("References for the {nrow(refs)} sources in the current selection of the {dataset_name} meta-analysis"),
+        glue::glue("Downloaded on {Sys.Date()}"),
+        ""
+      )
+      writeLines(c(header, paste0(refs$reference, "\n")), file, useBytes = TRUE)
+    }
+  )
+
+  output$download_references_bib <- downloadHandler(
+    filename = references_filename("bib"),
+    content = function(file) {
+      refs <- selected_references()
+      unmatched <- refs$reference[is.na(refs$bibtex)]
+      writeLines(c(
+        unique(stats::na.omit(refs$bibtex)),
+        if (length(unmatched)) c("", "% Sources without a BibTeX entry:", paste("%", unmatched))
+      ), file, useBytes = TRUE)
+    }
+  )
+
+  output$download_references_xlsx <- downloadHandler(
+    filename = references_filename("xlsx"),
+    content = function(file) {
+      selected_references() %>%
+        dplyr::select("Citation" = "citation", "Reference" = "reference", "Link" = "link", "Effect sizes", "Source ID" = "metaUI__article_label") %>%
+        writexl::write_xlsx(file)
+    }
+  )
 
 
   # Moderators  -----------------------------------------------------------
@@ -800,7 +873,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
       rve <- robumeta::robu(metaUI__effect_size ~ 1, data = df, studynum = metaUI__study_id, var.eff.size = metaUI__variance, small = FALSE)
 
-      robumeta::forest.robu(rve, es.lab = "metaUI__es_label", study.lab = "metaUI__study_id", "Effect size" = metaUI__effect_size)
+      robumeta::forest.robu(rve, es.lab = "metaUI__es_label", study.lab = "metaUI__study_label", "Effect size" = metaUI__effect_size)
     }, error = function(e) {
       # This will stop the execution and display the error message in the plot output
       plot(NA, xlim = c(0, 1), ylim = c(0, 1), type = "n", xlab = "", ylab = "", axes = FALSE)
@@ -930,7 +1003,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
       ggplot2::geom_violin(fill = grDevices::rgb(100 / 255, 180 / 255, 1, .5)) +
       ggplot2::theme_bw() +
       ggplot2::scale_y_continuous(name = metaUI_eff_size_type_label) +
-      ggplot2::geom_jitter(data = outliers, shape = 16, position = ggplot2::position_jitter(width = .1, height = 0), mapping = ggplot2::aes(text = metaUI__study_id)) +
+      ggplot2::geom_jitter(data = outliers, shape = 16, position = ggplot2::position_jitter(width = .1, height = 0), mapping = ggplot2::aes(text = metaUI__study_label)) +
       ggplot2::theme(
         axis.title.x = ggplot2::element_blank(),
         axis.text.x = ggplot2::element_blank(),
@@ -985,7 +1058,9 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
     list(
       dataset = df_filtered(),
       summary = as.data.frame(estimatesfiltered()),
-      filters = filter_selections
+      filters = filter_selections,
+      references = selected_references() %>%
+        dplyr::select("Citation" = "citation", "Reference" = "reference", "Link" = "link", "Effect sizes", "Source ID" = "metaUI__article_label")
     )
   })
 
