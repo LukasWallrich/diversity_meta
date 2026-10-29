@@ -228,7 +228,7 @@ df <- df[(df[['metaUI__filter_Collectivism']] >= input[['metaUI__filter_Collecti
       ~Sources, ~Studies,
       ~Effects, ~`Sample size`,
       length(unique(df$metaUI__article_label)), length(unique(df$metaUI__study_id)),
-      length(df$metaUI__study_id), sum(aggregate(metaUI__N ~ metaUI__study_id, data = df, FUN = "min")$metaUI__N) %>% round() %>% as.integer()
+      length(df$metaUI__study_id), sum(aggregate(metaUI__N ~ metaUI__study_id, data = df, FUN = "max")$metaUI__N) %>% round() %>% as.integer()
     )
 
     if (overview$Sources == 0) {
@@ -833,7 +833,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     }
 
-    modtable %>% DT::datatable(options = list(dom = "t"), escape = FALSE)
+    modtable %>% DT::datatable(options = list(dom = "t", paging = FALSE), escape = FALSE)
   })
 
   output$moderation_text <- shiny::renderText({
@@ -859,15 +859,15 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
     )
 
     het <- data.frame(
-      "Sigma2_Level1" = metapp_total$sigma2[1],
-      "Sigma2_Level2" = metapp_total$sigma2[2],
-      "Tau" = metapp_total$tau2,
-      "Q" = round(metapp_total$QE, digits = 2),
-      "Q_p" = fmt_p(metapp_total$QEp, include_equal = FALSE)
+      "&sigma;<sup>2</sup> between studies" = round_(metapp_total$sigma2[1], digits = 4),
+      "&sigma;<sup>2</sup> within studies" = round_(metapp_total$sigma2[2], digits = 4),
+      "Q" = round_(metapp_total$QE, digits = 2),
+      "p (Q)" = fmt_p(metapp_total$QEp, include_equal = FALSE),
+      check.names = FALSE
       )
 
-    print(het)
-  })
+    het
+  }, sanitize.text.function = function(x) x)
 
   # FOREST PLOT FOR ALL INCLUDED STUDIES ------------------------------------
   output$foreststudies <- renderPlot({
@@ -1000,8 +1000,9 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
   output$violin <- plotly::renderPlotly({
     df <- df_filtered()
 
-    efm <- mean(df$metaUI__effect_size)
-    efsd <- sd(df$metaUI__effect_size)
+    # z-scores relative to the full dataset, as used by the z-score filter
+    efm <- mean(metaUI__df$metaUI__effect_size)
+    efsd <- sd(metaUI__df$metaUI__effect_size)
 
     # Outliers in boxplot are quartiles + 1.5 * IQR - so cutsoffs calculated here to show points with labels
     qs <- quantile(df$metaUI__effect_size, c(.25, .75))
@@ -1034,7 +1035,11 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
       title = "Standardized effect size (z-score)"
     )
 
-    plotly_plot <- plotly::ggplotly(violinplot, tooltip = "text") %>%
+    plotly_plot <- plotly::ggplotly(violinplot, tooltip = "text")
+    # Align the z-score axis with the effect-size axis
+    ay$range <- (plotly_plot$x$layout$yaxis$range - efm) / efsd
+
+    plotly_plot <- plotly_plot %>%
       plotly::config(modeBarButtons = list(list("toImage")), displaylogo = FALSE) %>%
       plotly::add_lines(
         x = ~1, y = ~ (metaUI__effect_size - efm) / efsd, colors = NULL, yaxis = "y2",
