@@ -150,6 +150,12 @@ Changes made here:
 
 -   Added downloadable reference lists (.txt, .bib, .xlsx) for the sources in the current selection at the top of the Sample tab (and as a sheet in the dataset download). They draw on `shiny_code/references.rds`, which links each source ID to `refs_included.bib` using the source metadata from the public screening sheets (cached in `source_metadata.csv`). Rebuild it with `Rscript web_app/build_references.R` from the repository root whenever `dataset.rds` or `refs_included.bib` change, and check the non-exact matches it lists in `references_matches_to_check.csv`. Citations (used as source labels in the effect-size table, forest plot and downloads) and reference texts follow the article's reference list in `article_references.txt`; the table links each source to its DOI or URL.
 
+-   Fixed defects in the generated code: the hidden dataset download link is kept active (`suspendWhenHidden = FALSE`) so "Download dataset" works; the z-score slider sits in a plain `div` rather than an empty `uiOutput`; uploads without a file, failing p-/z-curves and selections without outliers show messages instead of errors; Egger's table shows tau²; label, rounding and typo fixes.
+
+-   Multilevel models (summary, moderation, heterogeneity) nest effects within studies using a unique effect ID (`metaUI__effect_id`, added in `df_reactive`), as in the article's analysis, rather than the effect-size value, which merged identical effects within a study. `signif_floor()`/`signif_ceiling()` no longer round back towards zero, so the default z-score range includes all effects (previously 9 were excluded).
+
+-   `models.R` adds a Correlated and Hierarchical Effects Model that reproduces the article's main analysis (`metafor::vcalc()` with rho = .6, `test = "t"`, `dfs = "contain"`); the standard multilevel model with independent sampling errors is kept as the first row, and the summary note explains the difference.
+
 ToDos:
 
 -   [ ] Add SESOI selection and add that line into charts (consider specific testing)

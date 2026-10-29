@@ -15,7 +15,7 @@
     summary_overview_main <- HTML("<br/><br/><h3>Sample Overview</h3>") # <b></b>
     summary_table_main <- HTML("<br/><br/><h3>Effect Size Estimates</h3>") # <b></b>
      # Confidence level needs to be changed in all entries in model.R if you want to adjust it
-    summary_table_notes <- HTML(glue::glue("<i>Notes:</i> LCL = Lower <<ci_width>> Confidence Limit, UCL = Upper <<ci_width>> Confidence Limit, k = number of effects.", .open = "<<", .close = ">>"))
+    summary_table_notes <- HTML(glue::glue("<i>Notes:</i> LCL = Lower <<ci_width>> Confidence Limit, UCL = Upper <<ci_width>> Confidence Limit, k = number of effect sizes for the two multilevel models and number of independent studies for all other models (for trim-and-fill, including imputed studies). The Random-Effects Multilevel Model treats the sampling errors of effects from the same study as independent. The Correlated and Hierarchical Effects Model reproduces the paper's main analysis: it assumes that these sampling errors correlate at .6 and uses <i>t</i>-tests with containment degrees of freedom.", .open = "<<", .close = ">>"))
 
     sample_references_main <- HTML("<br/><h3>Studies in this Selection</h3>")
     sample_overview_main <- HTML("<br/><br/><h3>Sample Breakdown</h3>") # <b></b>
@@ -30,12 +30,12 @@
 
     eggers_main <- HTML("<h3>Egger's Test of Funnel Plot Asymmetry</h3>")
 
-    pcurve_main <- HTML("<h3>P-Curve of Effects")
+    pcurve_main <- HTML("<h3>P-Curve of Effects</h3>")
 
-    zcurve_main <- HTML("<h3>Z-Curve of Effects (EM via EM, no bootstrapping)")
+    zcurve_main <- HTML("<h3>Z-Curve of Effects (EM algorithm, no bootstrapping)</h3>")
 
-    diagnostics_main <- HTML("<h3>Distribution of Effect Sizes")
-    diagnostics_het <- HTML("<h3>Heterogeneity (REML)<h5>")
+    diagnostics_main <- HTML("<h3>Distribution of Effect Sizes</h3>")
+    diagnostics_het <- HTML("<h3>Heterogeneity (ML)</h3>")
 
     scroll <- HTML("Scroll down to see forest plot.")
 

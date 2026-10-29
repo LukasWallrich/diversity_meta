@@ -22,7 +22,7 @@
       min = signif_floor(min(metaUI__df$metaUI__es_z), z_sig_dig),
       max = signif_ceiling(max(metaUI__df$metaUI__es_z), z_sig_dig), value = c(
         signif_floor(min(metaUI__df$metaUI__es_z), z_sig_dig),
-        signif_ceiling(max(metaUI__df$metaUI__es_z, na.rm = TRUE))
+        signif_ceiling(max(metaUI__df$metaUI__es_z, na.rm = TRUE), z_sig_dig)
       ), sep = ""
     )
   )
@@ -114,6 +114,9 @@ df <- df[(df[['metaUI__filter_Collectivism']] >= input[['metaUI__filter_Collecti
 
     # Filter by zscore
     df <- df[df$metaUI__es_z >= input$outliers_z_scores[1] & df$metaUI__es_z <= input$outliers_z_scores[2], ]
+
+    # Unique ID for each effect size, used as the lower level in multilevel models
+    df$metaUI__effect_id <- seq_len(nrow(df))
     df
   })
 
@@ -225,7 +228,7 @@ df <- df[(df[['metaUI__filter_Collectivism']] >= input[['metaUI__filter_Collecti
       ~Sources, ~Studies,
       ~Effects, ~`Sample size`,
       length(unique(df$metaUI__article_label)), length(unique(df$metaUI__study_id)),
-      length(df$metaUI__study_id), sum(aggregate(metaUI__N ~ metaUI__study_id, data = df, FUN = "min")$metaUI__N) %>% round()
+      length(df$metaUI__study_id), sum(aggregate(metaUI__N ~ metaUI__study_id, data = df, FUN = "max")$metaUI__N) %>% round() %>% as.integer()
     )
 
     if (overview$Sources == 0) {
@@ -569,7 +572,7 @@ output$`summary_metaUI__filter_Longevity_plot` <- renderPlot({
 })
   output$`summary_metaUI__filter_Power_distance_table` <- renderTable({ # { escapes the glue syntax
   df <- df_filtered()
-  summarise_numeric(df[['metaUI__filter_Power distance']], 'Power_distance')
+  summarise_numeric(df[['metaUI__filter_Power distance']], 'Power distance')
 })
 
 output$`summary_metaUI__filter_Power_distance_plot` <- renderPlot({
@@ -627,12 +630,14 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     out %>% DT::datatable(
       rownames = FALSE,
+      options = list(scrollX = TRUE),
       escape = setdiff(names(out), "Source"),
       caption = tags$caption(
         style = "caption-side: bottom; text-align: left; margin: 8px 0;",
         glue::glue("The effect size is given as {metaUI_eff_size_type_label}")
       )
-    )
+    ) %>%
+      DT::formatRound("Effect size", digits = 3)
   })
 
 
@@ -747,7 +752,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
       model <- metafor::rma.mv(
         yi = metaUI__effect_size,
         V = metaUI__variance,
-        random = ~ 1 | metaUI__study_id/metaUI__effect_size,
+        random = ~ 1 | metaUI__study_id/metaUI__effect_id,
         tdist = TRUE,
         data = df,
         mods = as.formula(glue::glue("~`{input$moderator}`")),
@@ -765,7 +770,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
      model_sig <- metafor::rma.mv(
         yi = metaUI__effect_size,
         V = metaUI__variance,
-        random = ~ 1 | metaUI__study_id/metaUI__effect_size,
+        random = ~ 1 | metaUI__study_id/metaUI__effect_id,
         tdist = TRUE,
         data = df,
         mods = as.formula(glue::glue("~`{input$moderator}`")),
@@ -775,7 +780,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
      model <- metafor::rma.mv(
         yi = metaUI__effect_size,
         V = metaUI__variance,
-        random = ~ 1 | metaUI__study_id/metaUI__effect_size,
+        random = ~ 1 | metaUI__study_id/metaUI__effect_id,
         tdist = TRUE,
         data = df,
         mods = as.formula(glue::glue("~`{input$moderator}` - 1")),
@@ -800,7 +805,9 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
     df <- df_filtered()
     if (is.numeric(df[[input$moderator]])) {
       modtable <- psych::describe(df[input$moderator] %>% as.data.frame(), fast = TRUE) # [c(2:5, 8, 9)]
-      modtable[, 2:6] <- round_(as.data.frame(modtable)[, 2:6], digits = 2)
+      modtable <- as.data.frame(modtable)
+      stat_cols <- setdiff(names(modtable), c("vars", "n"))
+      modtable[stat_cols] <- lapply(modtable[stat_cols], round_, digits = 2)
       modtable <- modtable %>% dplyr::rename(k = n)
       modtable$Intercept <- round_(model$b[1], digits = 2)
       modtable$`&beta;` <- round_(model$b[2], digits = 2)
@@ -826,7 +833,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     }
 
-    modtable %>% DT::datatable(options = list(dom = "t"), escape = FALSE)
+    modtable %>% DT::datatable(options = list(dom = "t", paging = FALSE), escape = FALSE)
   })
 
   output$moderation_text <- shiny::renderText({
@@ -844,7 +851,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
     metapp_total <- metafor::rma.mv(
       yi = metaUI__effect_size,
       V = metaUI__variance,
-      random = ~ 1 | metaUI__study_id/metaUI__effect_size,
+      random = ~ 1 | metaUI__study_id/metaUI__effect_id,
       tdist = TRUE, # knapp-hartung adjustment
       data = df,
       method = "ML", # REML failed to converge in tests
@@ -852,15 +859,15 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
     )
 
     het <- data.frame(
-      "Sigma2_Level1" = metapp_total$sigma2[1],
-      "Sigma2_Level2" = metapp_total$sigma2[2],
-      "Tau" = metapp_total$tau2,
-      "Q" = round(metapp_total$QE, digits = 2),
-      "Q_p" = fmt_p(metapp_total$QEp, include_equal = FALSE)
+      "&sigma;<sup>2</sup> between studies" = round_(metapp_total$sigma2[1], digits = 4),
+      "&sigma;<sup>2</sup> within studies" = round_(metapp_total$sigma2[2], digits = 4),
+      "Q" = round_(metapp_total$QE, digits = 2),
+      "p (Q)" = fmt_p(metapp_total$QEp, include_equal = FALSE),
+      check.names = FALSE
       )
 
-    print(het)
-  })
+    het
+  }, sanitize.text.function = function(x) x)
 
   # FOREST PLOT FOR ALL INCLUDED STUDIES ------------------------------------
   output$foreststudies <- renderPlot({
@@ -923,7 +930,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     eggers <- meta::metabias(meta_agg, k.min = 3, method.bias = "Egger")
     eggers_table <- data.frame(
-      "Intercept" = eggers$estimate, "Tau<sup>2</sup>" = eggers$tau,
+      "Intercept" = eggers$estimate, "Tau<sup>2</sup>" = eggers$tau^2,
       "t" = eggers$statistic,
       "p" = ifelse(round(eggers$p.value, 3) == 0, "< .001", round(eggers$p.value, 3)),
       check.names = FALSE
@@ -951,9 +958,13 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
         "n" = metaUI__N
       )
 
-    pcurve_estimates1 <- try(pcurve(pp_first, effect.estimation = FALSE, N = pp_first$n, dmin = 0, dmax = 1), silent = FALSE)
+    pcurve_estimates1 <- try(pcurve(pp_first, effect.estimation = FALSE, N = pp_first$n, dmin = 0, dmax = 1), silent = TRUE)
 
-    pcurve_estimates1 <- ifelse(substr(pcurve_estimates1, 1, 5) == "Error", 0, pcurve_estimates1)
+    if (inherits(pcurve_estimates1, "try-error")) {
+      shiny::validate(shiny::need(FALSE, paste(
+        "The p-curve could not be estimated for this selection:", conditionMessage(attr(pcurve_estimates1, "condition"))
+      )))
+    }
 
     pcurve_estimates1
   })
@@ -980,6 +991,12 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     zcurve_estimates1 <- try(zcurve::zcurve(df_first$z, bootstrap = FALSE), silent = TRUE)
 
+    if (inherits(zcurve_estimates1, "try-error")) {
+      shiny::validate(shiny::need(FALSE, paste(
+        "The z-curve could not be estimated for this selection:", conditionMessage(attr(zcurve_estimates1, "condition"))
+      )))
+    }
+
     zcurve::plot.zcurve(zcurve_estimates1, annotation = TRUE, main = "")
   })
 
@@ -987,8 +1004,9 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
   output$violin <- plotly::renderPlotly({
     df <- df_filtered()
 
-    efm <- mean(df$metaUI__effect_size)
-    efsd <- sd(df$metaUI__effect_size)
+    # z-scores relative to the full dataset, as used by the z-score filter
+    efm <- mean(metaUI__df$metaUI__effect_size)
+    efsd <- sd(metaUI__df$metaUI__effect_size)
 
     # Outliers in boxplot are quartiles + 1.5 * IQR - so cutsoffs calculated here to show points with labels
     qs <- quantile(df$metaUI__effect_size, c(.25, .75))
@@ -1021,7 +1039,11 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
       title = "Standardized effect size (z-score)"
     )
 
-    plotly_plot <- plotly::ggplotly(violinplot, tooltip = "text") %>%
+    plotly_plot <- plotly::ggplotly(violinplot, tooltip = "text")
+    # Align the z-score axis with the effect-size axis
+    ay$range <- (plotly_plot$x$layout$yaxis$range - efm) / efsd
+
+    plotly_plot <- plotly_plot %>%
       plotly::config(modeBarButtons = list(list("toImage")), displaylogo = FALSE) %>%
       plotly::add_lines(
         x = ~1, y = ~ (metaUI__effect_size - efm) / efsd, colors = NULL, yaxis = "y2",
@@ -1036,7 +1058,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
 
     # Hide boxplot outliers so that they are not shown multiple times
     plotly_plot$x$data <- lapply(plotly_plot$x$data, FUN = function(x) {
-      if (x$type == "box") {
+      if (isTRUE(x$type == "box")) {
         x$marker <- list(opacity = 0)
       }
       return(x)
@@ -1073,6 +1095,8 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
       writexl::write_xlsx(data_list(), file)
     }
   )
+  # The download link is hidden, so it needs to stay active to be clicked via JS
+  outputOptions(output, "executeDownload", suspendWhenHidden = FALSE)
 
   observeEvent(input$downloadData, {
     if (state_values$ever_analyzed == TRUE) {
@@ -1089,7 +1113,7 @@ output$`summary_metaUI__filter_Collectivism_plot` <- renderPlot({
   observeEvent(input$executeUpload, {
     state_values$to_upload <- TRUE
 
-    if (class(try(nrow(input$uploadData))) != "try-error") {
+    if (!is.null(input$uploadData)) {
       sheets <- readxl::excel_sheets(input$uploadData$datapath)
       if (!("dataset" %in% sheets && "filters" %in% sheets)) {
       showModal(modalDialog(title = "Invalid file", "The file needs to contain a dataset and a filters sheet. Typically, you should start from a file downloaded from this application."))
