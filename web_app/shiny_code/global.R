@@ -120,3 +120,15 @@ if (!requireNamespace("zcurve", quietly = TRUE)) {
   ui <- source(file.path(f, 'ui.R'))  %>% purrr::pluck('value')
   metaUI_eff_size_type_label <- 'r (adjusted for attenutation)'
   metaUI__df <- readRDS(file.path(f, 'dataset.rds'))
+  # Full references for each source, built by ../build_references.R
+  metaUI__references <- readRDS(file.path(f, 'references.rds'))
+  # Label sources and studies with their citation in the article's reference list
+  metaUI__df <- metaUI__df %>%
+    dplyr::select(-dplyr::any_of(c("metaUI__citation", "metaUI__link", "metaUI__study_label"))) %>%
+    dplyr::left_join(metaUI__references %>% dplyr::select("metaUI__article_label", metaUI__citation = "citation",
+      metaUI__link = "link"), by = "metaUI__article_label") %>%
+    dplyr::mutate(
+      author_year = metaUI__citation,
+      metaUI__study_label = paste0(metaUI__citation, " [",
+        stringr::str_remove(stringr::str_remove(metaUI__study_id, stringr::fixed(metaUI__article_label)), "^/"), "]")
+    )
