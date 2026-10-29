@@ -15,7 +15,7 @@
     summary_overview_main <- HTML("<br/><br/><h3>Sample Overview</h3>") # <b></b>
     summary_table_main <- HTML("<br/><br/><h3>Effect Size Estimates</h3>") # <b></b>
      # Confidence level needs to be changed in all entries in model.R if you want to adjust it
-    summary_table_notes <- HTML(glue::glue("<i>Notes:</i> LCL = Lower <<ci_width>> Confidence Limit, UCL = Upper <<ci_width>> Confidence Limit, k = number of effect sizes for the multilevel model and number of independent studies for all other models.", .open = "<<", .close = ">>"))
+    summary_table_notes <- HTML(glue::glue("<i>Notes:</i> LCL = Lower <<ci_width>> Confidence Limit, UCL = Upper <<ci_width>> Confidence Limit, k = number of effect sizes for the multilevel model and number of independent studies for all other models (for trim-and-fill, including imputed studies).", .open = "<<", .close = ">>"))
 
     sample_references_main <- HTML("<br/><h3>Studies in this Selection</h3>")
     sample_overview_main <- HTML("<br/><br/><h3>Sample Breakdown</h3>") # <b></b>
