@@ -150,6 +150,8 @@ Changes made here:
 
 -   Added downloadable reference lists (.txt, .bib, .xlsx) for the sources in the current selection at the top of the Sample tab (and as a sheet in the dataset download). They draw on `shiny_code/references.rds`, which links each source ID to `refs_included.bib` using the source metadata from the public screening sheets (cached in `source_metadata.csv`). Rebuild it with `Rscript web_app/build_references.R` from the repository root whenever `dataset.rds` or `refs_included.bib` change, and check the non-exact matches it lists in `references_matches_to_check.csv`. Citations (used as source labels in the effect-size table, forest plot and downloads) and reference texts follow the article's reference list in `article_references.txt`; the table links each source to its DOI or URL.
 
+-   Fixed defects in the generated code: the hidden dataset download link is kept active (`suspendWhenHidden = FALSE`) so "Download dataset" works; the z-score slider sits in a plain `div` rather than an empty `uiOutput`; uploads without a file, failing p-/z-curves and selections without outliers show messages instead of errors; Egger's table shows tau²; label, rounding and typo fixes.
+
 ToDos:
 
 -   [ ] Add SESOI selection and add that line into charts (consider specific testing)
